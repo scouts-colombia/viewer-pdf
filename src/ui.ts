@@ -1,5 +1,5 @@
 import type { ViewerState } from './viewer.ts';
-import { goToPage, setFitMode, getState } from './viewer.ts';
+import { goToPage, setFitMode, setSpreadMode, getState } from './viewer.ts';
 import { zoomIn, zoomOut } from './zoom.ts';
 
 const WHEEL_ZOOM_THRESHOLD = 80;
@@ -39,6 +39,11 @@ export function bindToolbar() {
     if (e.key === 'End') goToPage(getState().totalPages);
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
     if (e.key === '-') { e.preventDefault(); zoomOut(); }
+  });
+
+  // Spread mode (doble página)
+  q<HTMLButtonElement>('#btn-spread')?.addEventListener('click', () => {
+    setSpreadMode(!getState().spreadMode);
   });
 
   // Outline toggle
@@ -98,6 +103,7 @@ export function updateToolbar(state: ViewerState) {
 
   btnFitWidth?.classList.toggle('active', state.fitMode === 'width');
   btnFitPage?.classList.toggle('active', state.fitMode === 'page');
+  q<HTMLButtonElement>('#btn-spread')?.classList.toggle('active', state.spreadMode);
 }
 
 function q<T extends Element = Element>(sel: string): T | null {

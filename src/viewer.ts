@@ -12,6 +12,7 @@ export interface ViewerState {
   scale: number;
   fitMode: 'none' | 'width' | 'page';
   loading: boolean;
+  spreadMode: boolean;
 }
 
 interface PageMeta {
@@ -189,6 +190,7 @@ const state: ViewerState = {
   scale: 1.0,
   fitMode: 'width',
   loading: false,
+  spreadMode: false,
 };
 
 const pageMeta = new Map<number, PageMeta>();
@@ -233,6 +235,10 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
 
   containerEl.addEventListener('scroll', updateCurrentPageFromScroll, { passive: true });
   window.addEventListener('scroll', updateCurrentPageFromScroll, { passive: true });
+
+  window.addEventListener('resize', () => {
+    if (state.fitMode === 'none' && state.totalPages > 0) requestRerender();
+  }, { passive: true });
 }
 
 export async function loadDocument(url: URL) {
@@ -415,11 +421,16 @@ function effectiveScaleForPage(pageNum: number): number {
   if (!meta) return state.scale;
   const vp1 = meta.viewport1;
 
-  if (state.fitMode === 'width') {
-    return (containerEl.clientWidth - 32) / vp1.width;
-  }
+  // En spread mode la portada (pág. 1) sigue con ancho completo;
+  // el resto usa la mitad del contenedor menos el gap (24 px a cada lado + 16 gap).
+  const isSpreadPage = state.spreadMode && pageNum !== 1;
+  const usableWidth = isSpreadPage
+    ? Math.floor((containerEl.clientWidth - 64) / 2)
+    : containerEl.clientWidth - 32;
+
+  if (state.fitMode === 'width') return usableWidth / vp1.width;
   if (state.fitMode === 'page') {
-    const scaleW = (containerEl.clientWidth - 32) / vp1.width;
+    const scaleW = usableWidth / vp1.width;
     const scaleH = (window.innerHeight - 80) / vp1.height;
     return Math.min(scaleW, scaleH);
   }
@@ -506,6 +517,7 @@ export async function rerenderAll() {
   observer.disconnect();
   for (const p of placeholders) observer.observe(p);
   renderVisiblePlaceholders();
+  checkAutoSpread();
   window.setTimeout(() => {
     if (version === rerenderVersion) containerEl.classList.remove('is-zooming');
   }, 180);
@@ -553,6 +565,14 @@ export function setScale(newScale: number) {
 
 export function setFitMode(mode: 'width' | 'page') {
   state.fitMode = mode;
+  requestRerender();
+  onStateChange({ ...state });
+}
+
+export function setSpreadMode(enabled: boolean) {
+  if (state.spreadMode === enabled) return;
+  state.spreadMode = enabled;
+  containerEl.classList.toggle('spread-mode', enabled);
   requestRerender();
   onStateChange({ ...state });
 }
@@ -646,6 +666,23 @@ function restoreScrollAnchor(anchor: ScrollAnchor | null) {
     top: Math.max(0, Math.min(maxScroll, targetTop)),
     behavior: 'auto',
   });
+}
+
+/**
+ * Auto-activa/desactiva el spread mode en zoom manual:
+ * si dos páginas caben lado a lado, activa; si no, desactiva.
+ * No hace rerender (se llama desde dentro de rerenderAll).
+ */
+function checkAutoSpread() {
+  if (state.fitMode !== 'none') return;
+  const meta = pageMeta.get(1);
+  if (!meta) return;
+  const pageW = Math.floor(meta.viewport1.width * state.scale);
+  const twoFit = pageW * 2 + 64 <= containerEl.clientWidth - 32;
+  if (twoFit === state.spreadMode) return;
+  state.spreadMode = twoFit;
+  containerEl.classList.toggle('spread-mode', twoFit);
+  onStateChange({ ...state });
 }
 
 function renderVisiblePlaceholders() {

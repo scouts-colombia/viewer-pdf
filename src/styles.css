@@ -467,6 +467,24 @@ input:focus-visible {
 }
 
 
+/* ── Spread mode (doble página) ─────────────────────── */
+#viewer-container.spread-mode {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 16px 16px;
+}
+/* Portada: siempre ocupa el ancho completo */
+#viewer-container.spread-mode .page-placeholder[data-page="1"] {
+  width: 100% !important;
+  display: flex;
+  justify-content: center;
+}
+#viewer-container.spread-mode .page-placeholder[data-page="1"] canvas {
+  margin: 0 auto;
+}
+
 /* ── Mobile (<1024px) ───────────────────────────────── */
 @media (max-width: 1023px) {
   .toolbar {
