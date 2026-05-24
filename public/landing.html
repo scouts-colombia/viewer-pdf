@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visor PDF - Scouts de Colombia</title>
+  <meta name="description" content="Visor seguro de documentos PDF de la Asociación Scouts de Colombia">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://viewer.cdnscout.org/">
+  <meta property="og:title" content="Visor PDF - Scouts de Colombia">
+  <meta property="og:description" content="Visor seguro de documentos PDF de la Asociación Scouts de Colombia">
+  <meta property="og:image" content="https://viewer.cdnscout.org/og-image.png">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://viewer.cdnscout.org/">
+  <meta property="twitter:title" content="Visor PDF - Scouts de Colombia">
+  <meta property="twitter:description" content="Visor seguro de documentos PDF de la Asociación Scouts de Colombia">
+  <meta property="twitter:image" content="https://viewer.cdnscout.org/og-image.png">
+
+  <style>
+    @font-face {
+      font-family: 'Futura Std';
+      src: url('/fonts/futura-400.woff2') format('woff2');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Futura Std';
+      src: url('/fonts/futura-700.woff2') format('woff2');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --color-scouts-purple: #4d006e;
+      --color-scouts-yellow: #ffcd00;
+      --color-scouts-blue: #003087;
+    }
+
+    body {
+      font-family: 'Futura Std', system-ui, -apple-system, sans-serif;
+      background: #ffffff;
+      color: #1f2937;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .content {
+      text-align: center;
+      background: white;
+      border-radius: 1rem;
+      padding: 2.5rem;
+      max-width: 42rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .logo-main {
+      width: 12rem;
+      height: auto;
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--color-scouts-purple);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-size: 1.25rem;
+      font-weight: 500;
+      color: var(--color-scouts-blue);
+      margin-bottom: 1.5rem;
+    }
+
+    .description {
+      font-size: 0.95rem;
+      color: #4b5563;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+
+    .info-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      text-align: left;
+      font-size: 0.9rem;
+      color: #374151;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-box h2 {
+      color: var(--color-scouts-purple);
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .info-box p {
+      margin-bottom: 0.5rem;
+    }
+
+    .info-box p:last-child {
+      margin-bottom: 0;
+    }
+
+    .info-box code {
+      background: #e5e7eb;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+
+    .features {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      text-align: left;
+      font-size: 0.9rem;
+      color: #374151;
+      margin-bottom: 2rem;
+    }
+
+    .features h2 {
+      color: var(--color-scouts-purple);
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .features ul {
+      list-style-position: inside;
+      margin-left: 0.5rem;
+    }
+
+    .features li {
+      margin-bottom: 0.5rem;
+      line-height: 1.5;
+    }
+
+    .features li:last-child {
+      margin-bottom: 0;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--color-scouts-purple);
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.75rem;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn:hover {
+      background: #3d0056;
+      transform: translateY(-1px);
+    }
+
+    .icon {
+      width: 1rem;
+      height: 1rem;
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 1rem;
+      }
+
+      .content {
+        padding: 1.5rem;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
+
+      .subtitle {
+        font-size: 1.1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="content">
+    <img src="/logo-scouts-colombia.png" alt="Scouts de Colombia" class="logo-main" loading="eager">
+
+    <h1>Visor PDF</h1>
+    <p class="subtitle">Visualización Segura de Documentos</p>
+    <p class="description">
+      Micrositio seguro de visualización de PDFs usando un visor personalizado basado en PDF.js 5.x en un entorno aislado.
+      Permite consultar documentos de forma rápida y segura desde cualquier dispositivo.
+    </p>
+
+    <div class="info-box">
+      <h2>Información del Servicio</h2>
+      <p><strong>Dominio:</strong> <code>viewer.cdnscout.org</code></p>
+      <p><strong>Propósito:</strong> Visualización segura de documentos PDF</p>
+      <p><strong>Tecnología:</strong> PDF.js 5.x (Mozilla)</p>
+      <p><strong>Estado:</strong> <span style="color:#10b981;font-weight:600;">● Operativo</span></p>
+    </div>
+
+    <div class="features">
+      <h2>Características de Seguridad</h2>
+      <ul>
+        <li><strong>Content Security Policy (CSP):</strong> Políticas estrictas de seguridad</li>
+        <li><strong>Validación de URLs:</strong> Solo acepta PDFs desde <code>cdnscout.org</code></li>
+        <li><strong>Sandbox de Iframe:</strong> Aislamiento en subdominio separado</li>
+        <li><strong>HTTPS Obligatorio:</strong> Todas las conexiones son cifradas</li>
+        <li><strong>Sin plugins:</strong> Visualización nativa en el navegador</li>
+      </ul>
+    </div>
+
+    <a href="https://scout.org.co" class="btn">
+      <span>Ir al sitio principal</span>
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+      </svg>
+    </a>
+  </div>
+</body>
+</html>

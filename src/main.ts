@@ -15,7 +15,13 @@ const errorScreen = document.getElementById('error-screen')!;
 const loader = document.getElementById('loader')!;
 
 if (!pdfUrl) {
-  showError(rawUrl ? 'URL de documento no permitida.' : 'No se especificó un documento.');
+  if (rawUrl) {
+    // Hay un ?file= pero la URL no pasa la validación
+    showError('URL de documento no permitida.');
+  } else {
+    // No se pasó ningún parámetro → mostrar landing
+    showLanding();
+  }
 } else {
   start(pdfUrl);
 }
@@ -90,4 +96,8 @@ function showError(msg: string) {
   errorScreen.style.display = 'flex';
   const msgEl = document.getElementById('error-msg');
   if (msgEl) msgEl.textContent = msg;
+}
+
+function showLanding() {
+  window.location.replace('/landing.html');
 }
