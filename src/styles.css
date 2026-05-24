@@ -65,6 +65,35 @@ body {
   overflow-x: hidden;
 }
 
+/* ── Custom scrollbar ───────────────────────────────── */
+/* Webkit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(77, 0, 110, 0.2);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 0, 110, 0.45);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(77, 0, 110, 0.2) transparent;
+}
+
 button { cursor: pointer; font-family: inherit; }
 button:focus-visible {
   outline: 2px solid var(--scouts-yellow);
