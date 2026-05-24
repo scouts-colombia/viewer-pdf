@@ -495,8 +495,20 @@ input:focus-visible {
     flex-wrap: wrap;
     justify-content: center;
     border-radius: 1.25rem;
-    padding: 6px 8px;
+    padding: 5px 6px;
+    gap: 2px;
   }
+
+  .toolbar-group { gap: 0; }
+  .toolbar-divider { margin: 0 2px; }
+
+  .icon-btn { width: 30px; height: 30px; }
+
+  /* Ocultamos el chip de zoom y el "/ N" — el input ya muestra la página actual,
+     y los botones fit-width / fit-page indican el modo activo */
+  .zoom-chip { display: none; }
+  .page-sep { display: none; }
+  .page-input { width: 36px; padding: 3px 2px; font-size: 12px; }
 
   .outline-panel {
     left: 8px;
@@ -513,10 +525,17 @@ input:focus-visible {
   }
 
   #viewer-container {
-    padding-top: 80px;
+    padding-top: 72px;
   }
 
   #search-input { width: 160px; }
+}
+
+/* ── Mobile pequeño (<420px): apretar aún más ───────── */
+@media (max-width: 419px) {
+  .icon-btn { width: 28px; height: 28px; }
+  .toolbar-divider { display: none; }
+  .toolbar { padding: 4px 6px; }
 }
 
 /* ── Desktop (≥1024px) ─────────────────────────────── */
