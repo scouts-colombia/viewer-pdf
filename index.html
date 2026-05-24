@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Visor de documentos — Scouts Colombia</title>
+  </head>
+  <body>
+
+    <!-- Loader anti-CLS -->
+    <div id="loader">
+      <div class="spinner"></div>
+      <p>Cargando documento…</p>
+    </div>
+
+    <!-- Pantalla de error -->
+    <div id="error-screen">
+      <div class="error-card surface-glass">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <circle cx="20" cy="20" r="18" stroke="#4d006e" stroke-width="2" stroke-opacity="0.3"/>
+          <path d="M20 12v10M20 27v1" stroke="#4d006e" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <p id="error-msg">No se pudo cargar el documento.</p>
+      </div>
+    </div>
+
+    <!-- Toolbar flotante -->
+    <div id="toolbar" class="surface-glass toolbar" role="toolbar" aria-label="Controles del visor">
+
+      <!-- Grupo navegación -->
+      <div class="toolbar-group">
+        <button id="btn-prev" class="icon-btn" title="Página anterior (←)" aria-label="Página anterior">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <input id="page-input" class="page-input" type="text" inputmode="numeric" value="1" aria-label="Página actual" />
+        <span class="page-sep">/ <span id="page-total">0</span></span>
+        <button id="btn-next" class="icon-btn" title="Página siguiente (→)" aria-label="Página siguiente">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- Grupo zoom -->
+      <div class="toolbar-group">
+        <button id="btn-zoom-out" class="icon-btn" title="Reducir zoom (−)" aria-label="Reducir zoom">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8h10" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <span id="zoom-display" class="zoom-chip" aria-live="polite">Ancho</span>
+        <button id="btn-zoom-in" class="icon-btn" title="Aumentar zoom (+)" aria-label="Aumentar zoom">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="btn-fit-width" class="icon-btn" title="Ajustar a ancho" aria-label="Ajustar a ancho">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 8h12M2 8l3-3M2 8l3 3M14 8l-3-3M14 8l-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button id="btn-fit-page" class="icon-btn" title="Ajustar a página" aria-label="Ajustar a página completa">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="3" y="2" width="10" height="12" rx="1" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- Grupo herramientas -->
+      <div class="toolbar-group">
+        <button id="btn-search" class="icon-btn" title="Buscar (Ctrl+F)" aria-label="Buscar en el documento">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="6.5" cy="6.5" r="4" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M9.5 9.5l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="btn-outline" class="icon-btn" title="Índice del documento" aria-label="Mostrar índice">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 4h10M3 8h7M3 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Barra de búsqueda expandida (se activa con .search-open en #toolbar) -->
+      <div class="search-bar" role="search">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+            <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" stroke-width="1.25"/>
+            <path d="M8 8l2.5 2.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+          </svg>
+          <input id="search-input" type="text" placeholder="Buscar en el documento…" autocomplete="off" spellcheck="false" />
+          <span id="search-counter" class="search-counter" aria-live="polite"></span>
+        </div>
+        <button id="btn-search-prev" class="icon-btn" title="Resultado anterior (↑)" aria-label="Resultado anterior">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 8l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button id="btn-search-next" class="icon-btn" title="Resultado siguiente (↓)" aria-label="Resultado siguiente">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button id="btn-search-close" class="icon-btn close-btn" title="Cerrar búsqueda (Esc)" aria-label="Cerrar búsqueda">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Panel de outline lateral -->
+    <aside id="outline-panel" class="surface-glass outline-panel" aria-label="Índice del documento">
+      <div class="outline-header">
+        <span class="outline-title">Índice</span>
+        <button class="icon-btn close-btn" id="btn-outline-close" aria-label="Cerrar índice">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div id="outline-list" class="outline-scroll"></div>
+    </aside>
+
+    <!-- Área de páginas del PDF -->
+    <main id="viewer-container" role="main" aria-label="Documento"></main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
