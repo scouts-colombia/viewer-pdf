@@ -516,7 +516,7 @@ export function goToPage(pageNum: number) {
   state.currentPage = clamped;
 
   const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${clamped}"]`);
-  placeholder?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (placeholder) scrollToElement(placeholder, 'smooth');
   onStateChange({ ...state });
 }
 
@@ -524,11 +524,24 @@ function scrollPageIntoViewIfNeeded(pageNum: number) {
   const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
   if (!placeholder) return;
 
+  const containerRect = containerEl.getBoundingClientRect();
   const { top, bottom } = placeholder.getBoundingClientRect();
-  const isVisible = bottom > 0 && top < window.innerHeight;
+  const isVisible = bottom > containerRect.top && top < containerRect.bottom;
   if (isVisible) return;
 
-  placeholder.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+  scrollToElement(placeholder, 'auto');
+}
+
+/**
+ * Scroll the viewport to a page placeholder without using scrollIntoView(),
+ * which can propagate through iframe boundaries and scroll the parent page.
+ */
+function scrollToElement(el: HTMLElement, behavior: ScrollBehavior) {
+  const scrollRoot = document.scrollingElement ?? document.documentElement;
+  const elTop = el.getBoundingClientRect().top + scrollRoot.scrollTop;
+  // Offset by the toolbar height (≈60 px) so the page isn't hidden behind it
+  const offset = 68;
+  scrollRoot.scrollTo({ top: elTop - offset, behavior });
 }
 
 export function setScale(newScale: number) {
