@@ -1,0 +1,20 @@
+{
+  "name": "viewer-pdf",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "dev": "vite",
+    "build": "node scripts/copy-pdfjs-assets.mjs && tsc && vite build",
+    "preview": "vite preview",
+    "postinstall": "node scripts/copy-pdfjs-assets.mjs"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.7.284"
+  }
+}
