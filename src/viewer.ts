@@ -201,6 +201,10 @@ const pageMeta = new Map<number, PageMeta>();
 const pageCache = new Map<number, PageCache>();
 // Fragmentos citados por Zulú, por número de página.
 const citasPorPagina = new Map<number, string[]>();
+// Página pedida antes de que existan los placeholders (?page= o una cita): el
+// documento abre y pinta primero esa.
+let paginaInicial = 1;
+let placeholdersListos = false;
 let rerenderVersion = 0;
 let rerenderPromise: Promise<void> | null = null;
 let rerenderQueued = false;
@@ -247,7 +251,11 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
   }, { passive: true });
 }
 
-export async function loadDocument(url: URL) {
+/**
+ * Abre el documento. `alAbrir` corre en cuanto pdf.js lo abre, antes de pintar
+ * nada, para que la página que embebe el visor mande las citas en paralelo.
+ */
+export async function loadDocument(url: URL, alAbrir: () => void) {
   setState({ loading: true });
 
   const task = pdfjsLib.getDocument({
@@ -267,23 +275,36 @@ export async function loadDocument(url: URL) {
   pdfDoc = await task.promise;
   linkService.setDocument(pdfDoc);
   findController.setDocument(pdfDoc);
+  alAbrir();
 
   setState({ totalPages: pdfDoc.numPages, currentPage: 1, loading: false });
   await buildPlaceholders();
 }
 
+/**
+ * Crea los placeholders y pinta primero la página inicial (?page= o la de una
+ * cita), sin esperar a medir el resto del documento ni a pintar la página 1.
+ */
 async function buildPlaceholders() {
+  const doc = pdfDoc!;
   containerEl.innerHTML = '';
   pageCache.clear();
   pageMeta.clear();
   observer.disconnect();
+  if (state.totalPages === 0) return;
 
-  if (state.totalPages > 0) {
-    const firstPage = await pdfDoc!.getPage(1);
-    pageMeta.set(1, { viewport1: firstPage.getViewport({ scale: 1 }) });
-    firstPage.cleanup();
-  }
+  const medir = async (n: number) => {
+    const viewport1 = (await doc.getPage(n)).getViewport({ scale: 1 });
+    if (!pageMeta.has(n)) pageMeta.set(n, { viewport1 });
+  };
+  const destino = () => Math.max(1, Math.min(state.totalPages, paginaInicial));
+  // La página 1 da el tamaño estimado del resto. Si llega una cita mientras se
+  // mide, el destino cambia y se mide también.
+  await Promise.all([medir(1), medir(destino())]);
+  while (!pageMeta.has(destino())) await medir(destino());
+  if (pdfDoc !== doc) return;
 
+  const placeholders: HTMLElement[] = [];
   for (let i = 1; i <= state.totalPages; i++) {
     const placeholder = document.createElement('div');
     placeholder.className = 'page-placeholder';
@@ -291,46 +312,87 @@ async function buildPlaceholders() {
     const { width, height } = effectiveSize(i);
     placeholder.style.width = width + 'px';
     placeholder.style.height = height + 'px';
-    containerEl.appendChild(placeholder);
-    observer.observe(placeholder);
+    placeholders.push(placeholder);
+  }
+  containerEl.append(...placeholders);
+
+  // Desde aquí goToPage salta en vez de guardar la página.
+  placeholdersListos = true;
+  const inicial = destino();
+  const objetivo = placeholders[inicial - 1];
+  if (inicial > 1) {
+    state.currentPage = inicial;
+    scrollToElement(objetivo, 'auto');
+    onStateChange({ ...state });
   }
 
+  // Si esa página falla, el resto del documento se sigue mostrando.
+  await renderPage(inicial, objetivo).catch(err => console.error('[viewer]', err));
+  if (pdfDoc !== doc) return;
+
+  // Con la página inicial pintada, las vecinas.
+  for (const p of placeholders) observer.observe(p);
   // Fallback: IntersectionObserver may not fire in hidden/headless contexts.
-  setTimeout(renderVisiblePlaceholders, 0);
-  // Se espera para que el salto a ?page= o a una cita caiga con los tamaños reales.
-  await medirPaginas();
+  renderVisiblePlaceholders();
+  void medirPaginas(doc);
 }
 
 /**
- * Lee el tamaño real de cada página. Los placeholders arrancan con el de la
- * página 1; en documentos con páginas de otro tamaño (dobles, horizontales)
- * el scroll saltaba al pintarlas e "ir a la página" caía en otro lugar.
+ * Lee en segundo plano y por lotes el tamaño real de cada página. Los
+ * placeholders arrancan con el de la página 1; en documentos con páginas de
+ * otro tamaño (dobles, horizontales) el scroll saltaba al pintarlas e "ir a la
+ * página" caía en otro lugar.
  */
-async function medirPaginas() {
-  const doc = pdfDoc!;
-  const base = pageMeta.get(1)?.viewport1;
-  if (!base) return;
-
-  const distintas: number[] = [];
-  for (let i = 2; i <= state.totalPages; i++) {
+async function medirPaginas(doc: PDFDocumentProxy) {
+  const base = pageMeta.get(1)!.viewport1;
+  const LOTE = 8;
+  for (let desde = 2; desde <= state.totalPages; desde += LOTE) {
+    const lote: number[] = [];
+    for (let i = desde; i < desde + LOTE && i <= state.totalPages; i++) {
+      if (!pageMeta.has(i)) lote.push(i); // ya pintada: su placeholder tiene el tamaño real
+    }
+    // Una página a la vez: en paralelo, sus peticiones Range ocupan las
+    // conexiones y retrasan las de la página que se está mirando.
+    const viewports: PageViewport[] = [];
+    for (const i of lote) viewports.push((await doc.getPage(i)).getViewport({ scale: 1 }));
     if (pdfDoc !== doc) return;
-    if (pageMeta.has(i)) continue; // ya pintada: su placeholder tiene el tamaño real
-    const viewport1 = (await doc.getPage(i)).getViewport({ scale: 1 });
-    pageMeta.set(i, { viewport1 });
-    if (viewport1.width !== base.width || viewport1.height !== base.height) distintas.push(i);
-  }
-  if (distintas.length === 0 || pdfDoc !== doc) return;
 
-  const anchor = captureScrollAnchor();
-  for (const i of distintas) {
-    if (pageCache.has(i)) continue;
-    const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${i}"]`);
-    if (!placeholder) continue;
-    const { width, height } = effectiveSize(i);
-    placeholder.style.width = width + 'px';
-    placeholder.style.height = height + 'px';
+    const distintas: number[] = [];
+    lote.forEach((i, k) => {
+      if (pageMeta.has(i)) return; // la pintó renderPage mientras tanto
+      pageMeta.set(i, { viewport1: viewports[k] });
+      if (viewports[k].width !== base.width || viewports[k].height !== base.height) distintas.push(i);
+    });
+    if (distintas.length > 0) {
+      sinMoverVista(() => {
+        for (const i of distintas) {
+          if (pageCache.has(i)) continue; // renderPage le pone su tamaño al pintarla
+          const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${i}"]`);
+          if (!placeholder) continue;
+          const { width, height } = effectiveSize(i);
+          placeholder.style.width = width + 'px';
+          placeholder.style.height = height + 'px';
+        }
+      });
+    }
+    // Cede el hilo principal entre lotes.
+    await new Promise(r => setTimeout(r, 0));
   }
-  restoreScrollAnchor(anchor);
+}
+
+/**
+ * Cambia tamaños de placeholders sin mover lo que se ve: si la página actual
+ * se desplazó en pantalla porque cambió algo encima, el scroll lo compensa.
+ * Si el navegador ya lo compensó (scroll anchoring), el delta es 0.
+ */
+function sinMoverVista(cambiar: () => void) {
+  updateCurrentPageFromScroll();
+  const ancla = containerEl.querySelector<HTMLElement>(`[data-page="${state.currentPage}"]`);
+  const antes = ancla?.getBoundingClientRect().top;
+  cambiar();
+  if (!ancla || antes === undefined) return;
+  const delta = ancla.getBoundingClientRect().top - antes;
+  if (delta !== 0) window.scrollBy({ top: delta, behavior: 'auto' });
 }
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
@@ -347,7 +409,10 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
 async function renderPage(pageNum: number, placeholder: HTMLElement) {
   if (pageCache.has(pageNum)) return;
 
-  const page = await pdfDoc!.getPage(pageNum);
+  const doc = pdfDoc!;
+  const page = await doc.getPage(pageNum);
+  // El observer y renderVisiblePlaceholders pueden pedir la misma página a la vez.
+  if (pdfDoc !== doc || pageCache.has(pageNum)) return;
   if (!pageMeta.has(pageNum)) {
     pageMeta.set(pageNum, { viewport1: page.getViewport({ scale: 1 }) });
   }
@@ -387,6 +452,8 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
   // so a zoom rerender keeps the old one visible until this one is ready.
   // onContinue replaces requestAnimationFrame so renders complete in headless
   // and background-tab browser contexts.
+  // El texto se pide después del canvas, no en paralelo: el worker de pdf.js es
+  // uno solo y en paralelo retrasa el canvas sin adelantar el texto (medido).
   const task = page.render({ canvas, transform, viewport });
   task.onContinue = (cont: () => void) => setTimeout(cont, 0);
   pageCache.get(pageNum)!.renderTask = task;
@@ -395,8 +462,14 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
 
   // Swap only after the first new render is ready, keeping the previous canvas
   // visible during zoom rerenders instead of flashing a blank page.
-  placeholder.style.width = cssW + 'px';
-  placeholder.style.height = cssH + 'px';
+  // Una página de tamaño distinto al estimado cambia de alto; si está encima
+  // de la vista, no debe mover lo que se ve.
+  if (placeholder.style.width !== cssW + 'px' || placeholder.style.height !== cssH + 'px') {
+    sinMoverVista(() => {
+      placeholder.style.width = cssW + 'px';
+      placeholder.style.height = cssH + 'px';
+    });
+  }
   placeholder.innerHTML = '';
   // --total-scale-factor is consumed by pdfjs textLayer CSS to size text spans.
   // Without it the spans render at scale=1 regardless of zoom, making highlights
@@ -406,6 +479,7 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
   placeholder.append(canvas, capaCitas, textLayerDiv);
 
   const textContent = await page.getTextContent();
+  if (!isCurrentRender()) return;
   const tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
   await tl.render();
 
@@ -559,6 +633,10 @@ export async function rerenderAll() {
 }
 
 export function goToPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
+  if (!placeholdersListos) {
+    paginaInicial = pageNum;
+    return;
+  }
   const clamped = Math.max(1, Math.min(state.totalPages, pageNum));
   state.currentPage = clamped;
 
