@@ -145,6 +145,26 @@ https://viewer.cdnscout.org
 
 Hosting recomendado: **Cloudflare Pages** (build command: `pnpm build`, output: `dist`).
 
+`scripts/copy-pdfjs-assets.mjs` publica los recursos en `/pdfjs/<versión>/`,
+leyendo la versión instalada de `pdfjs-dist`. El visor usa la versión exportada
+por esa misma biblioteca, sin importar su `package.json` al bundle. El script
+también actualiza la regla literal de `public/_headers`: un año de caché
+inmutable, junto con la CSP global. `vite preview` no aplica esos headers.
+
+Los recursos de `public/pdfjs` están versionados en Git. Las rutas antiguas sin
+versión conservan los archivos de PDF.js 5.7.284 y su caché corta para atender
+visores abiertos antes del cambio. No se deben reemplazar por otra versión del
+worker: debe coincidir con la biblioteca del JS que lo carga. Revalidar el HTML
+no actualiza una pestaña ya abierta; no hay un número de despliegues que asegure
+que todas se hayan cerrado. Retirar estas rutas exige aceptar que esos clientes
+tendrán que recargar.
+
+El script elimina carpetas de otras versiones para no acumularlas. En futuras
+actualizaciones de PDF.js, las pestañas que todavía ejecuten el JS anterior
+necesitarán recargar si piden un recurso de la versión retirada que no tienen
+en caché. Para soportarlas sin recarga habría que conservar esos recursos fuera
+de esta limpieza.
+
 ## Tecnologías
 
 - Vite · TypeScript · PDF.js

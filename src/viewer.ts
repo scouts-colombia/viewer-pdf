@@ -6,7 +6,8 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import { ubicarFragmento, type ItemTexto } from './citas.ts';
 import { isPageInViewport } from './viewport.ts';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
+const pdfjsBase = `/pdfjs/${pdfjsLib.version}/`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `${pdfjsBase}pdf.worker.min.mjs`;
 
 // Un solo worker para todos los documentos: se crea al arrancar, así compila
 // mientras el visor espera, y destruir un documento no lo cierra (pdf.js solo
@@ -282,14 +283,14 @@ export async function loadDocument(url: URL, pagina: number, alAbrir?: () => voi
 
   const task = pdfjsLib.getDocument({
     url: url.toString(),
-    cMapUrl: '/pdfjs/cmaps/',
+    cMapUrl: `${pdfjsBase}cmaps/`,
     cMapPacked: true,
-    standardFontDataUrl: '/pdfjs/standard_fonts/',
+    standardFontDataUrl: `${pdfjsBase}standard_fonts/`,
     // Ningún PDF de la biblioteca usa formularios XFA; apagarlo quita superficie de ataque.
     enableXfa: false,
     useSystemFonts: true,
     useWorkerFetch: true,
-    wasmUrl: '/pdfjs/wasm/',
+    wasmUrl: `${pdfjsBase}wasm/`,
     // Abrir en una página (una cita, ?page=) pide solo los rangos que esa página
     // necesita: el stream completo toma el candado de la caché HTTP de Chrome y
     // los rangos esperan a que baje el archivo entero. Leer desde el principio
