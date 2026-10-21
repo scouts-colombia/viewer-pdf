@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "node scripts/copy-pdfjs-assets.mjs && tsc && vite build",
     "preview": "vite preview",
-    "postinstall": "node scripts/copy-pdfjs-assets.mjs"
+    "postinstall": "node scripts/copy-pdfjs-assets.mjs",
+    "test": "node --test test/*.test.ts"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

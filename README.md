@@ -82,6 +82,7 @@ El build copia primero los assets necesarios de `pdfjs-dist` hacia `public/pdfjs
 | `pnpm dev` | Inicia Vite en desarrollo |
 | `pnpm build` | Copia assets de PDF.js, corre TypeScript y genera `dist/` |
 | `pnpm preview` | Previsualiza el build localmente |
+| `pnpm test` | Corre las pruebas de `test/` con el runner de Node |
 | `node scripts/copy-pdfjs-assets.mjs` | Sincroniza worker, cmaps, fuentes y wasm de PDF.js |
 
 ## Parámetros
@@ -89,14 +90,25 @@ El build copia primero los assets necesarios de `pdfjs-dist` hacia `public/pdfjs
 | Parámetro | Descripción | Ejemplo |
 | :--- | :--- | :--- |
 | `file` | URL absoluta del documento a visualizar | `?file=https://cdnscout.org/biblioteca/doc.pdf` |
+| `page` | Página en la que abre el documento (opcional) | `&page=12` |
 
 Si `file` está ausente el visor redirige a la landing. Si no pasa la validación de seguridad, muestra una pantalla de error.
+
+## Citas desde Zulú
+
+Zulú embebe el visor en un iframe y le pasa los fragmentos que citó con `postMessage`:
+
+1. Cuando el documento carga, el visor envía `{ tipo: 'visor:listo' }` a la ventana padre.
+2. La página padre responde con `{ tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }`.
+3. El visor subraya cada fragmento en su página y salta a `pagina`, o a la primera página citada. Un mensaje nuevo reemplaza las citas anteriores.
+
+Solo se aceptan mensajes de `https://*.scout.org.co` y de `http://localhost`. El fragmento viene de una transcripción de la página, así que no se busca la frase exacta (`src/citas.ts`): se ubica el tramo donde se concentran los trigramas de palabras del fragmento. Si la página no tiene capa de texto o la transcripción es muy distinta, el visor solo abre la página.
 
 ## Seguridad
 
 - `validatePdfUrl()` bloquea protocolos peligrosos: `javascript:`, `data:`, `file:`, `blob:` y `vbscript:`.
 - En producción solo se aceptan documentos servidos por `cdnscout.org` o subdominios.
-- `_headers` define CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` y `frame-ancestors`.
+- `public/_headers` define CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` y `frame-ancestors`. Tiene que estar en `public/` para que Vite lo copie a `dist/`, que es lo que publica Cloudflare Pages.
 - El worker R2 limita CORS a orígenes conocidos.
 - `download` en el worker se sanitiza antes de crear `Content-Disposition`.
 

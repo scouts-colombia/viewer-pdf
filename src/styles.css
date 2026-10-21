@@ -449,6 +449,21 @@ input:focus-visible {
 #viewer-container.is-zooming .page-placeholder canvas {
   opacity: 0.92;
 }
+/* Citas de Zulú: violeta claro para no confundirse con el amarillo de la
+   búsqueda. multiply deja el texto negro legible, y como el grupo se mezcla
+   entero, los rectángulos que se solapan no oscurecen. */
+.capa-citas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.capa-citas > div {
+  position: absolute;
+  background: #e8d4f2;
+  border-radius: 2px;
+}
+
 /* textLayer override for highlights — override pdfjs default purple/green */
 :is(.textLayer .highlight,
     .textLayer .highlight.begin,
