@@ -1,0 +1,13 @@
+{
+  "name": "r2-download-cleaner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "cf deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "beta",
+    "cf": "^1.0.0-beta.14",
+    "vite": "^8.3.0"
+  }
+}
