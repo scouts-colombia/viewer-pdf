@@ -101,6 +101,7 @@ Zulú embebe el visor en un iframe y le pasa los fragmentos que citó con `postM
 1. Cuando el documento carga, el visor envía `{ tipo: 'visor:listo' }` a la ventana padre.
 2. La página padre responde con `{ tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }`.
 3. El visor subraya cada fragmento en su página y salta a `pagina`, o a la primera página citada. Un mensaje nuevo reemplaza las citas anteriores.
+4. Si se pulsa `Escape` dentro del visor (fuera de un campo de texto), el visor envía `{ tipo: 'visor:escape' }` a la ventana padre, que puede cerrar el panel. Las teclas dentro de un iframe no llegan a la página que lo embebe.
 
 Solo se aceptan mensajes de `https://*.scout.org.co` y de `http://localhost`. El fragmento viene de una transcripción de la página, así que no se busca la frase exacta (`src/citas.ts`): se ubica el tramo donde se concentran los trigramas de palabras del fragmento. Si la página no tiene capa de texto o la transcripción es muy distinta, el visor solo abre la página.
 
