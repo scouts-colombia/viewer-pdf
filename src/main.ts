@@ -94,6 +94,17 @@ async function start(url: URL) {
   if (window.parent !== window) window.parent.postMessage({ tipo: 'visor:listo' }, '*');
 }
 
+// Las teclas pulsadas dentro del iframe no llegan a la página que lo embebe:
+// Escape le avisa para que cierre el panel. En un campo (búsqueda, página)
+// Escape es de ese campo.
+if (window.parent !== window) {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) {
+      window.parent.postMessage({ tipo: 'visor:escape' }, '*');
+    }
+  });
+}
+
 // Zulú embebe el visor y le manda los fragmentos citados de este documento:
 // { tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }. Subraya cada
 // fragmento en su página y salta a `pagina`, o a la primera página citada.
