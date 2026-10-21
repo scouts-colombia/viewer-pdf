@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' https://cdnscout.org https://*.cdnscout.org; frame-ancestors https://scout.org.co https://*.scout.org.co http://localhost:4321 http://localhost:3000 http://localhost:4000; base-uri 'none'; object-src 'none';
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' https://cdnscout.org https://*.cdnscout.org https://cloudflareinsights.com; frame-ancestors https://scout.org.co https://*.scout.org.co http://localhost:4321 http://localhost:3000 http://localhost:4000; base-uri 'none'; object-src 'none';
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: geolocation=(), microphone=(), camera=()
