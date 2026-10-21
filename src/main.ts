@@ -7,6 +7,8 @@ import { loadOutline } from './outline.ts';
 import type { ViewerState } from './viewer.ts';
 
 const params = new URLSearchParams(window.location.search);
+// ?tema=zulu pinta el visor con los colores de Zulú (styles.css).
+if (params.get('tema') === 'zulu') document.documentElement.dataset.tema = 'zulu';
 const rawUrl = params.get('file') ?? '';
 const pdfUrl = validatePdfUrl(rawUrl);
 

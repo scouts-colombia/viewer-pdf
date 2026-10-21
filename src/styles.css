@@ -27,13 +27,18 @@
 /* ── Tokens ─────────────────────────────────────────── */
 :root {
   --scouts-purple: #4d006e;
-  --scouts-blue:   #003087;
   --scouts-yellow: #ffcd00;
   --scouts-bg:     #D6E8F5;
+  /* Acento de íconos, bordes y sombras (azul Scouts). */
+  --acento-rgb:    0,48,135;
+  --cita:          #e8d4f2;
+  --busqueda:          rgba(255, 205, 0, 0.45);
+  --busqueda-actual:   rgba(255, 160, 0, 0.65);
+  --busqueda-contorno: rgba(255, 140, 0, 0.9);
 
   --surface-bg:      linear-gradient(to bottom, rgba(255,255,255,0.95), rgba(255,255,255,0.80));
   --surface-border:  2px solid rgba(255,255,255,0.6);
-  --surface-shadow:  0 8px 32px rgba(0,48,135,0.12),
+  --surface-shadow:  0 8px 32px rgba(var(--acento-rgb),0.12),
                      inset 0 1px 0 rgba(255,255,255,0.9),
                      inset 0 -1px 0 rgba(0,0,0,0.06);
   --surface-blur:    blur(12px);
@@ -46,6 +51,18 @@
   font-size: 14px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Tema Zulú (?tema=zulu): crema y morado de Zulú. Las citas van en el
+   amarillo de sus botones y la búsqueda pasa al violeta claro, para que no
+   se confundan. */
+:root[data-tema="zulu"] {
+  --scouts-bg:         #fff8eb;
+  --acento-rgb:        77,0,110;
+  --cita:              #ffe17a;
+  --busqueda:          rgba(77, 0, 110, 0.16);
+  --busqueda-actual:   rgba(77, 0, 110, 0.3);
+  --busqueda-contorno: rgba(77, 0, 110, 0.6);
 }
 
 /* ── Reset ──────────────────────────────────────────── */
@@ -195,7 +212,7 @@ input:focus-visible {
   width: 1px;
   height: 20px;
   background: rgba(255,255,255,0.6);
-  border-left: 1px solid rgba(0,48,135,0.08);
+  border-left: 1px solid rgba(var(--acento-rgb),0.08);
   margin: 0 4px;
   flex-shrink: 0;
 }
@@ -210,7 +227,7 @@ input:focus-visible {
   border-radius: var(--radius-btn);
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(0,48,135,0.6);
+  color: rgba(var(--acento-rgb),0.6);
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   padding: 0;
   flex-shrink: 0;
@@ -218,16 +235,16 @@ input:focus-visible {
 .icon-btn:hover {
   background: rgba(255,255,255,0.7);
   border-color: rgba(255,255,255,0.8);
-  color: var(--scouts-blue);
+  color: rgb(var(--acento-rgb));
 }
 .icon-btn:active {
-  background: rgba(0,48,135,0.06);
-  border-color: rgba(0,48,135,0.12);
+  background: rgba(var(--acento-rgb),0.06);
+  border-color: rgba(var(--acento-rgb),0.12);
 }
 .icon-btn.active {
-  background: rgba(0,48,135,0.08);
-  border-color: rgba(0,48,135,0.15);
-  color: var(--scouts-blue);
+  background: rgba(var(--acento-rgb),0.08);
+  border-color: rgba(var(--acento-rgb),0.15);
+  color: rgb(var(--acento-rgb));
 }
 .icon-btn:disabled {
   opacity: 0.35;
@@ -254,7 +271,7 @@ input:focus-visible {
 }
 .page-sep {
   font-size: 12px;
-  color: rgba(0,48,135,0.45);
+  color: rgba(var(--acento-rgb),0.45);
   padding: 0 2px;
 }
 
@@ -269,7 +286,7 @@ input:focus-visible {
   border: 1px solid rgba(255,255,255,0.7);
   font-size: 11px;
   font-weight: 500;
-  color: rgba(0,48,135,0.7);
+  color: rgba(var(--acento-rgb),0.7);
   font-variant-numeric: tabular-nums;
 }
 
@@ -295,7 +312,7 @@ input:focus-visible {
 .search-icon {
   position: absolute;
   left: 8px;
-  color: rgba(0,48,135,0.4);
+  color: rgba(var(--acento-rgb),0.4);
   pointer-events: none;
 }
 #search-input {
@@ -313,7 +330,7 @@ input:focus-visible {
   position: absolute;
   right: 8px;
   font-size: 11px;
-  color: rgba(0,48,135,0.45);
+  color: rgba(var(--acento-rgb),0.45);
   font-variant-numeric: tabular-nums;
   display: none;
 }
@@ -341,13 +358,13 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px 8px;
-  border-bottom: 1px solid rgba(0,48,135,0.07);
+  border-bottom: 1px solid rgba(var(--acento-rgb),0.07);
   flex-shrink: 0;
 }
 .outline-title {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0,48,135,0.6);
+  color: rgba(var(--acento-rgb),0.6);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -384,8 +401,8 @@ input:focus-visible {
   background: rgba(255,255,255,0.7);
 }
 .outline-row.current {
-  background: rgba(0,48,135,0.06);
-  border: 1px solid rgba(0,48,135,0.12);
+  background: rgba(var(--acento-rgb),0.06);
+  border: 1px solid rgba(var(--acento-rgb),0.12);
 }
 .outline-chevron {
   display: flex;
@@ -393,7 +410,7 @@ input:focus-visible {
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: rgba(0,48,135,0.4);
+  color: rgba(var(--acento-rgb),0.4);
   flex-shrink: 0;
   transition: transform 0.2s;
 }
@@ -426,7 +443,7 @@ input:focus-visible {
   position: relative;
   background: white;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,48,135,0.10);
+  box-shadow: 0 4px 16px rgba(var(--acento-rgb),0.10);
   overflow: hidden;
   flex-shrink: 0;
   transition:
@@ -444,7 +461,7 @@ input:focus-visible {
   will-change: transform;
 }
 #viewer-container.is-zooming .page-placeholder {
-  box-shadow: 0 8px 28px rgba(0,48,135,0.14);
+  box-shadow: 0 8px 28px rgba(var(--acento-rgb),0.14);
 }
 #viewer-container.is-zooming .page-placeholder canvas {
   opacity: 0.92;
@@ -460,7 +477,7 @@ input:focus-visible {
 }
 .capa-citas > div {
   position: absolute;
-  background: #e8d4f2;
+  background: var(--cita);
   border-radius: 2px;
 }
 
@@ -469,15 +486,15 @@ input:focus-visible {
     .textLayer .highlight.begin,
     .textLayer .highlight.middle,
     .textLayer .highlight.end) {
-  background-color: rgba(255, 205, 0, 0.45) !important;
+  background-color: var(--busqueda) !important;
   border-radius: 2px;
 }
 :is(.textLayer .highlight.selected,
     .textLayer .highlight.begin.selected,
     .textLayer .highlight.middle.selected,
     .textLayer .highlight.end.selected) {
-  background-color: rgba(255, 160, 0, 0.65) !important;
-  outline: 2px solid rgba(255, 140, 0, 0.9);
+  background-color: var(--busqueda-actual) !important;
+  outline: 2px solid var(--busqueda-contorno);
   border-radius: 2px;
 }
 
