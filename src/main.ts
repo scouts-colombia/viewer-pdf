@@ -1,6 +1,6 @@
 import './styles.css';
 import { validatePdfUrl } from './security.ts';
-import { initViewer, loadDocument, getPdfDocument } from './viewer.ts';
+import { initViewer, loadDocument, getPdfDocument, goToPage, setCitas } from './viewer.ts';
 import { bindToolbar, updateToolbar } from './ui.ts';
 import { initSearch, openSearch } from './search.ts';
 import { loadOutline } from './outline.ts';
@@ -9,6 +9,14 @@ import type { ViewerState } from './viewer.ts';
 const params = new URLSearchParams(window.location.search);
 const rawUrl = params.get('file') ?? '';
 const pdfUrl = validatePdfUrl(rawUrl);
+
+const ORIGEN_CITAS = /^https:\/\/([a-z0-9-]+\.)*scout\.org\.co$|^http:\/\/localhost:\d+$/;
+const MAX_CITAS = 200;
+const MAX_LARGO_CITA = 5000;
+
+let documentoListo = false;
+// ?page=N abre el documento en esa página.
+let paginaPendiente = paginaValida(params.get('page'));
 
 const container = document.getElementById('viewer-container')!;
 const errorScreen = document.getElementById('error-screen')!;
@@ -68,12 +76,46 @@ async function start(url: URL) {
       ? new URL('/cdn-proxy' + url.pathname + url.search, window.location.origin)
       : url;
 
+  window.addEventListener('message', recibirCitas);
+
   try {
     await loadDocument(loadUrl);
   } catch (err) {
     console.error('[viewer]', err);
     showError('No se pudo cargar el documento. Verifica que la URL sea válida y que el archivo exista.');
+    return;
   }
+
+  documentoListo = true;
+  if (paginaPendiente > 0) goToPage(paginaPendiente, 'auto');
+  // Avisa a la página que embebe el visor (Zulú) que ya puede mandar citas.
+  if (window.parent !== window) window.parent.postMessage({ tipo: 'visor:listo' }, '*');
+}
+
+// Zulú embebe el visor y le manda los fragmentos citados de este documento:
+// { tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }. Subraya cada
+// fragmento en su página y salta a `pagina`, o a la primera página citada.
+function recibirCitas(e: MessageEvent) {
+  if (!ORIGEN_CITAS.test(e.origin) || e.data?.tipo !== 'zulu:citas') return;
+  const citas = (Array.isArray(e.data.citas) ? e.data.citas : [])
+    .slice(0, MAX_CITAS)
+    .flatMap((c: { pagina?: unknown; texto?: unknown }) => {
+      const pagina = paginaValida(c?.pagina);
+      return pagina > 0 && typeof c.texto === 'string' && c.texto.length <= MAX_LARGO_CITA
+        ? [{ pagina, texto: c.texto }]
+        : [];
+    });
+  setCitas(citas);
+
+  const pagina = paginaValida(e.data.pagina) || Math.min(...citas.map((c: { pagina: number }) => c.pagina));
+  if (!Number.isFinite(pagina) || pagina <= 0) return;
+  if (documentoListo) goToPage(pagina, 'auto');
+  else paginaPendiente = pagina;
+}
+
+function paginaValida(valor: unknown): number {
+  const n = Number(valor);
+  return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
 let outlineInitialized = false;

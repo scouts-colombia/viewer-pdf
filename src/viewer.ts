@@ -3,6 +3,7 @@ import { TextLayer } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { EventBus, PDFLinkService, PDFFindController } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import 'pdfjs-dist/web/pdf_viewer.css';
+import { ubicarFragmento, type ItemTexto } from './citas.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
 
@@ -22,6 +23,9 @@ interface PageMeta {
 interface PageCache {
   canvas: HTMLCanvasElement;
   textLayer: HTMLDivElement;
+  capaCitas: HTMLDivElement;
+  // Ítems de texto de la página alineados con los textDivs del TextLayer.
+  textoPagina: { items: ItemTexto[]; divs: Node[] } | null;
   renderTask: { cancel: () => void } | null;
   highlighter: TextHighlighter | null;
 }
@@ -195,6 +199,8 @@ const state: ViewerState = {
 
 const pageMeta = new Map<number, PageMeta>();
 const pageCache = new Map<number, PageCache>();
+// Fragmentos citados por Zulú, por número de página.
+const citasPorPagina = new Map<number, string[]>();
 let rerenderVersion = 0;
 let rerenderPromise: Promise<void> | null = null;
 let rerenderQueued = false;
@@ -249,7 +255,8 @@ export async function loadDocument(url: URL) {
     cMapUrl: '/pdfjs/cmaps/',
     cMapPacked: true,
     standardFontDataUrl: '/pdfjs/standard_fonts/',
-    enableXfa: true,
+    // Ningún PDF de la biblioteca usa formularios XFA; apagarlo quita superficie de ataque.
+    enableXfa: false,
     useSystemFonts: true,
     useWorkerFetch: true,
     wasmUrl: '/pdfjs/wasm/',
@@ -290,6 +297,40 @@ async function buildPlaceholders() {
 
   // Fallback: IntersectionObserver may not fire in hidden/headless contexts.
   setTimeout(renderVisiblePlaceholders, 0);
+  // Se espera para que el salto a ?page= o a una cita caiga con los tamaños reales.
+  await medirPaginas();
+}
+
+/**
+ * Lee el tamaño real de cada página. Los placeholders arrancan con el de la
+ * página 1; en documentos con páginas de otro tamaño (dobles, horizontales)
+ * el scroll saltaba al pintarlas e "ir a la página" caía en otro lugar.
+ */
+async function medirPaginas() {
+  const doc = pdfDoc!;
+  const base = pageMeta.get(1)?.viewport1;
+  if (!base) return;
+
+  const distintas: number[] = [];
+  for (let i = 2; i <= state.totalPages; i++) {
+    if (pdfDoc !== doc) return;
+    if (pageMeta.has(i)) continue; // ya pintada: su placeholder tiene el tamaño real
+    const viewport1 = (await doc.getPage(i)).getViewport({ scale: 1 });
+    pageMeta.set(i, { viewport1 });
+    if (viewport1.width !== base.width || viewport1.height !== base.height) distintas.push(i);
+  }
+  if (distintas.length === 0 || pdfDoc !== doc) return;
+
+  const anchor = captureScrollAnchor();
+  for (const i of distintas) {
+    if (pageCache.has(i)) continue;
+    const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${i}"]`);
+    if (!placeholder) continue;
+    const { width, height } = effectiveSize(i);
+    placeholder.style.width = width + 'px';
+    placeholder.style.height = height + 'px';
+  }
+  restoreScrollAnchor(anchor);
 }
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
@@ -333,30 +374,23 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
   textLayerDiv.style.width = cssW + 'px';
   textLayerDiv.style.height = cssH + 'px';
 
-  pageCache.set(pageNum, { canvas, textLayer: textLayerDiv, renderTask: null, highlighter: null });
+  const capaCitas = document.createElement('div');
+  capaCitas.className = 'capa-citas';
+
+  pageCache.set(pageNum, {
+    canvas, textLayer: textLayerDiv, capaCitas, textoPagina: null, renderTask: null, highlighter: null,
+  });
   const isCurrentRender = () => pageCache.get(pageNum)?.canvas === canvas;
 
-  // Renders into an offscreen canvas, then copies atomically to the visible
-  // canvas — avoids a blank flash when the second render clears and redraws.
+  // A single pass: pdf.js resolves the render promise only after every image
+  // (JPEG2000 included) is decoded and painted. The canvas is still detached,
+  // so a zoom rerender keeps the old one visible until this one is ready.
   // onContinue replaces requestAnimationFrame so renders complete in headless
   // and background-tab browser contexts.
-  const renderOffscreen = async () => {
-    const off = document.createElement('canvas');
-    off.width = pw;
-    off.height = ph;
-    const task = page.render({ canvas: off, transform, viewport });
-    task.onContinue = (cont: () => void) => setTimeout(cont, 0);
-    const cache = pageCache.get(pageNum);
-    if (cache) cache.renderTask = task;
-    await task.promise;
-    if (!isCurrentRender()) return; // cleaned up or superseded while rendering
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, pw, ph);
-    ctx.drawImage(off, 0, 0);
-  };
-
-  // First pass: shows page immediately (photo may be absent if still decoding).
-  try { await renderOffscreen(); } catch { return; }
+  const task = page.render({ canvas, transform, viewport });
+  task.onContinue = (cont: () => void) => setTimeout(cont, 0);
+  pageCache.get(pageNum)!.renderTask = task;
+  try { await task.promise; } catch { return; }
   if (!isCurrentRender()) return;
 
   // Swap only after the first new render is ready, keeping the previous canvas
@@ -368,21 +402,20 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
   // Without it the spans render at scale=1 regardless of zoom, making highlights
   // appear at the wrong size and position relative to the canvas.
   placeholder.style.setProperty('--total-scale-factor', String(scale));
-  placeholder.appendChild(canvas);
-  placeholder.appendChild(textLayerDiv);
+  // La capa de citas va entre el canvas y el textLayer para no tapar la selección.
+  placeholder.append(canvas, capaCitas, textLayerDiv);
 
-  // Second pass after 400 ms: by then the worker has decoded async images
-  // (JPEG2000 / inline images) that were silently skipped on first pass.
-  await new Promise<void>(r => setTimeout(r, 400));
-  if (!isCurrentRender()) return;
-  try { await renderOffscreen(); } catch { return; }
-
-  if (!isCurrentRender()) return;
   const textContent = await page.getTextContent();
   const tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
   await tl.render();
 
   if (!isCurrentRender()) return;
+  pageCache.get(pageNum)!.textoPagina = {
+    // Mismo filtro que TextLayer: solo los ítems con `str` tienen textDiv.
+    items: textContent.items.flatMap(i => ('str' in i ? [{ str: i.str, hasEOL: i.hasEOL }] : [])),
+    divs: tl.textDivs,
+  };
+  pintarCitas(pageNum);
   const hl = new TextHighlighter(findController, eventBus, pageNum - 1);
   hl.setTextMapping(tl.textDivs, tl.textContentItemsStr);
   hl.enable();
@@ -403,6 +436,7 @@ async function cleanupPage(pageNum: number, placeholder: HTMLElement) {
   cached.canvas.width = 0;
   cached.canvas.height = 0;
   cached.canvas.remove();
+  cached.capaCitas.remove();
   cached.textLayer.remove();
   pageCache.delete(pageNum);
 
@@ -464,6 +498,7 @@ export async function rerenderAll() {
     try { cached.renderTask?.cancel(); } catch {}
     cached.highlighter?.disable();
     cached.textLayer.style.display = 'none';
+    cached.capaCitas.style.display = 'none';
   }
   pageCache.clear();
 
@@ -523,13 +558,91 @@ export async function rerenderAll() {
   }, 180);
 }
 
-export function goToPage(pageNum: number) {
+export function goToPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
   const clamped = Math.max(1, Math.min(state.totalPages, pageNum));
   state.currentPage = clamped;
 
   const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${clamped}"]`);
-  if (placeholder) scrollToElement(placeholder, 'smooth');
+  if (placeholder) scrollToElement(placeholder, behavior);
   onStateChange({ ...state });
+}
+
+/** Reemplaza los fragmentos citados y vuelve a subrayar las páginas pintadas. */
+export function setCitas(citas: Array<{ pagina: number; texto: string }>) {
+  citasPorPagina.clear();
+  for (const { pagina, texto } of citas) {
+    citasPorPagina.set(pagina, [...(citasPorPagina.get(pagina) ?? []), texto]);
+  }
+  for (const pageNum of pageCache.keys()) pintarCitas(pageNum);
+}
+
+function pintarCitas(pageNum: number) {
+  const cached = pageCache.get(pageNum);
+  if (!cached?.textoPagina) return;
+  const { items, divs } = cached.textoPagina;
+  const capa = cached.capaCitas;
+  capa.replaceChildren();
+  const origen = capa.getBoundingClientRect();
+
+  for (const texto of citasPorPagina.get(pageNum) ?? []) {
+    // Sin capa de texto o con una transcripción muy distinta no hay tramo:
+    // el visor solo abre la página.
+    const tramo = ubicarFragmento(items, texto);
+    if (!tramo) continue;
+    const rango = document.createRange();
+    rango.setStart(...puntoEnTexto(divs[tramo.desde.item], tramo.desde.offset));
+    rango.setEnd(...puntoEnTexto(divs[tramo.hasta.item], tramo.hasta.offset));
+    for (const r of unirPorLinea([...rango.getClientRects()])) {
+      const marca = document.createElement('div');
+      marca.style.left = r.left - origen.left + 'px';
+      marca.style.top = r.top - origen.top + 'px';
+      marca.style.width = r.right - r.left + 'px';
+      marca.style.height = r.bottom - r.top + 'px';
+      capa.append(marca);
+    }
+  }
+}
+
+type Caja = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Un rectángulo por palabra deja huecos en el texto justificado. Une los que
+ * comparten línea y están a menos de una altura de letra de distancia.
+ */
+function unirPorLinea(rects: DOMRect[]): Caja[] {
+  const cajas: Caja[] = [];
+  const ordenados = rects
+    .filter(r => r.width >= 1 && r.height >= 1)
+    .sort((a, b) => a.top - b.top || a.left - b.left);
+  for (const r of ordenados) {
+    const alto = r.bottom - r.top;
+    const linea = cajas.find(c =>
+      Math.abs(c.top - r.top) < alto / 2 && r.left - c.right < alto && c.left - r.right < alto);
+    if (linea) {
+      linea.left = Math.min(linea.left, r.left);
+      linea.right = Math.max(linea.right, r.right);
+      linea.top = Math.min(linea.top, r.top);
+      linea.bottom = Math.max(linea.bottom, r.bottom);
+    } else {
+      cajas.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }
+  return cajas;
+}
+
+/**
+ * Nodo de texto y offset dentro de un textDiv. El resaltador de la búsqueda
+ * parte el texto del div en varios nodos, así que no basta con firstChild.
+ */
+function puntoEnTexto(div: Node, offset: number): [Node, number] {
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  let resto = offset;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const largo = n.textContent!.length;
+    if (resto <= largo) return [n, resto];
+    resto -= largo;
+  }
+  return [div, div.childNodes.length];
 }
 
 function scrollPageIntoViewIfNeeded(pageNum: number) {

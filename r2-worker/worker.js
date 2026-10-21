@@ -1,8 +1,12 @@
 /**
- * r2-download-cleaner — con CORS para viewer.cdnscout.org
+ * r2-download-cleaner — descargas con nombre legible en biblioteca.cdnscout.org
  *
- * Para actualizar:
- *   Cloudflare Dashboard → Workers & Pages → r2-download-cleaner → Edit code → pegar este archivo
+ * Sirve el bucket R2 scouts-cdn (binding MY_BUCKET) y, con ?download=nombre,
+ * pone un Content-Disposition sin el hash de Strapi. El visor no pasa por
+ * aquí: lee de cdnscout.org, dominio propio del bucket con su política CORS.
+ *
+ * Para actualizar, con la CLI cf: subir una versión con
+ * `cf workers versions create` y desplegarla con `cf workers deployments create`.
  */
 
 const ALLOWED_ORIGINS = [
@@ -52,10 +56,22 @@ function cleanDownloadName(name, fallback) {
   return cleaned || fallback;
 }
 
+// filename= solo admite ASCII: tildes y rayas viajaban como bytes UTF-8
+// crudos. El nombre completo va en filename*, que los navegadores prefieren.
 function contentDisposition(type, filename) {
-  const encoded = encodeURIComponent(filename);
-  return `${type}; filename="${filename}"; filename*=UTF-8''${encoded}`;
+  const ascii = filename
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_');
+  const encoded = encodeURIComponent(filename)
+    .replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
+
+// Los archivos de Strapi llevan hash en el nombre, pero en el bucket también
+// hay subidas a mano que se pueden sobrescribir: un día de caché y, después,
+// revalidación con ETag (304).
+const CACHE_CONTROL = 'public, max-age=86400';
 
 export default {
   async fetch(request, env) {
@@ -101,9 +117,12 @@ export default {
       });
     }
 
-    const object      = range
-      ? await env.MY_BUCKET.get(key, { range })
-      : await env.MY_BUCKET.get(key);
+    // HEAD solo necesita metadatos; antes descargaba el objeto entero.
+    // onlyIf aplica If-None-Match / If-Modified-Since: si el navegador ya tiene
+    // la versión vigente, R2 devuelve el objeto sin cuerpo y se responde 304.
+    const object = request.method === 'HEAD'
+      ? await env.MY_BUCKET.head(key)
+      : await env.MY_BUCKET.get(key, { onlyIf: request.headers, ...(range ? { range } : {}) });
 
     if (object === null) {
       return new Response('Archivo no encontrado', { status: 404, headers: cors });
@@ -113,6 +132,13 @@ export default {
     object.writeHttpMetadata(headers);
     headers.set('etag', object.httpEtag);
     headers.set('Accept-Ranges', 'bytes');
+    if (!headers.has('Cache-Control')) headers.set('Cache-Control', CACHE_CONTROL);
+
+    if (request.method === 'GET' && !('body' in object)) {
+      const precondicionFallida =
+        request.headers.has('If-Match') || request.headers.has('If-Unmodified-Since');
+      return new Response(null, { status: precondicionFallida ? 412 : 304, headers });
+    }
 
     if (downloadName && allowedExtensions.includes(fileExtension)) {
       const fallbackName = key.split('/').pop() || 'documento';
@@ -123,6 +149,11 @@ export default {
       );
     }
 
+    if (request.method === 'HEAD') {
+      headers.set('Content-Length', String(object.size));
+      return new Response(null, { headers });
+    }
+
     // Range response
     if (range && object.range) {
       const { offset, length } = object.range;
@@ -130,9 +161,9 @@ export default {
         'Content-Range',
         `bytes ${offset}-${offset + length - 1}/${object.size}`
       );
-      return new Response(request.method === 'HEAD' ? null : object.body, { status: 206, headers });
+      return new Response(object.body, { status: 206, headers });
     }
 
-    return new Response(request.method === 'HEAD' ? null : object.body, { headers });
+    return new Response(object.body, { headers });
   },
 };
