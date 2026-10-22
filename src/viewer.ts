@@ -4,6 +4,7 @@ import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { EventBus, PDFLinkService, PDFFindController } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { ubicarFragmento, type ItemTexto } from './citas.ts';
+import { isPageInViewport } from './viewport.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
 
@@ -649,10 +650,7 @@ function scrollPageIntoViewIfNeeded(pageNum: number) {
   const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
   if (!placeholder) return;
 
-  const containerRect = containerEl.getBoundingClientRect();
-  const { top, bottom } = placeholder.getBoundingClientRect();
-  const isVisible = bottom > containerRect.top && top < containerRect.bottom;
-  if (isVisible) return;
+  if (isPageInViewport(placeholder.getBoundingClientRect(), window.innerHeight)) return;
 
   scrollToElement(placeholder, 'auto');
 }
