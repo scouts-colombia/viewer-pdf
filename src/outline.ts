@@ -12,8 +12,11 @@ export async function loadOutline(
   containerEl: HTMLElement,
   toggleBtn: HTMLButtonElement,
   panelEl: HTMLElement,
+  vigente: () => boolean,
 ) {
-  const outline = (await pdfDoc.getOutline()) as OutlineItem[] | null;
+  const outline = (await pdfDoc.getOutline().catch(() => null)) as OutlineItem[] | null;
+  // Mientras se leía, el visor pudo abrir otro documento.
+  if (!vigente()) return;
 
   if (!outline || outline.length === 0) {
     toggleBtn.disabled = true;
@@ -23,6 +26,8 @@ export async function loadOutline(
   }
 
   toggleBtn.disabled = false;
+  toggleBtn.title = 'Índice del documento';
+  panelEl.style.display = '';
   containerEl.innerHTML = '';
   containerEl.appendChild(buildTree(outline, pdfDoc));
 }

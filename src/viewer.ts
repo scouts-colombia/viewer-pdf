@@ -7,6 +7,14 @@ import { ubicarFragmento, type ItemTexto } from './citas.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
 
+// Un solo worker para todos los documentos: se crea al arrancar, así compila
+// mientras el visor espera, y destruir un documento no lo cierra (pdf.js solo
+// destruye el worker que creó él mismo).
+let worker: pdfjsLib.PDFWorker | null = null;
+export function iniciarWorker() {
+  worker ??= new pdfjsLib.PDFWorker();
+}
+
 export interface ViewerState {
   totalPages: number;
   currentPage: number;
@@ -180,6 +188,9 @@ class TextHighlighter {
 }
 
 let pdfDoc: PDFDocumentProxy | null = null;
+// Carga en curso o documento abierto; se destruye al abrir otro.
+let tarea: pdfjsLib.PDFDocumentLoadingTask | null = null;
+let carga = 0;
 let containerEl: HTMLElement;
 let observer: IntersectionObserver;
 let onStateChange: (s: ViewerState) => void;
@@ -252,11 +263,17 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
 }
 
 /**
- * Abre el documento. `alAbrir` corre en cuanto pdf.js lo abre, antes de pintar
- * nada, para que la página que embebe el visor mande las citas en paralelo.
+ * Abre el documento en `pagina` y descarta el que hubiera, cargado o a medio
+ * cargar. Las citas se borran aquí, de forma síncrona: las que se guarden
+ * después de llamar se subrayan al pintar. `alAbrir` corre en cuanto pdf.js lo
+ * abre, antes de pintar nada, para que la página que embebe el visor mande las
+ * citas en paralelo. Si otra llamada la reemplaza, termina sin error.
  */
-export async function loadDocument(url: URL, alAbrir: () => void) {
-  setState({ loading: true });
+export async function loadDocument(url: URL, pagina: number, alAbrir?: () => void) {
+  const id = ++carga;
+  descartarDocumento();
+  paginaInicial = pagina > 0 ? pagina : 1;
+  setState({ totalPages: 0, currentPage: 1, scale: 1, fitMode: 'width', spreadMode: false, loading: true });
 
   const task = pdfjsLib.getDocument({
     url: url.toString(),
@@ -270,15 +287,46 @@ export async function loadDocument(url: URL, alAbrir: () => void) {
     wasmUrl: '/pdfjs/wasm/',
     disableStream: false,
     disableAutoFetch: false,
+    worker: worker ?? undefined,
   });
+  tarea = task;
 
-  pdfDoc = await task.promise;
-  linkService.setDocument(pdfDoc);
-  findController.setDocument(pdfDoc);
-  alAbrir();
+  try {
+    const doc = await task.promise;
+    if (id !== carga) return;
+    pdfDoc = doc;
+    linkService.setDocument(doc);
+    findController.setDocument(doc);
+    alAbrir?.();
 
-  setState({ totalPages: pdfDoc.numPages, currentPage: 1, loading: false });
-  await buildPlaceholders();
+    setState({ totalPages: doc.numPages, currentPage: 1, loading: false });
+    await buildPlaceholders();
+  } catch (err) {
+    // Un documento descartado a medio cargar rechaza sus promesas: no es error.
+    if (id === carga) throw err;
+  }
+}
+
+/** Cancela el documento actual y deja el visor vacío, en el ajuste por defecto. */
+function descartarDocumento() {
+  void tarea?.destroy();
+  tarea = null;
+  pdfDoc = null;
+  linkService.setDocument(null);
+  findController.setDocument(null as unknown as PDFDocumentProxy);
+  placeholdersListos = false;
+  rerenderVersion++;
+  observer.disconnect();
+  for (const cached of pageCache.values()) {
+    try { cached.renderTask?.cancel(); } catch {}
+    cached.highlighter?.disable();
+  }
+  pageCache.clear();
+  pageMeta.clear();
+  citasPorPagina.clear();
+  containerEl.replaceChildren();
+  containerEl.classList.remove('spread-mode', 'is-zooming');
+  (document.scrollingElement ?? document.documentElement).scrollTo({ top: 0, behavior: 'auto' });
 }
 
 /**
@@ -295,13 +343,13 @@ async function buildPlaceholders() {
 
   const medir = async (n: number) => {
     const viewport1 = (await doc.getPage(n)).getViewport({ scale: 1 });
-    if (!pageMeta.has(n)) pageMeta.set(n, { viewport1 });
+    if (pdfDoc === doc && !pageMeta.has(n)) pageMeta.set(n, { viewport1 });
   };
   const destino = () => Math.max(1, Math.min(state.totalPages, paginaInicial));
   // La página 1 da el tamaño estimado del resto. Si llega una cita mientras se
   // mide, el destino cambia y se mide también.
   await Promise.all([medir(1), medir(destino())]);
-  while (!pageMeta.has(destino())) await medir(destino());
+  while (pdfDoc === doc && !pageMeta.has(destino())) await medir(destino());
   if (pdfDoc !== doc) return;
 
   const placeholders: HTMLElement[] = [];
@@ -367,9 +415,10 @@ async function buildPlaceholders() {
 async function medirPaginas(doc: PDFDocumentProxy) {
   const base = pageMeta.get(1)!.viewport1;
   const LOTE = 8;
-  for (let desde = 2; desde <= state.totalPages; desde += LOTE) {
+  for (let desde = 2; desde <= doc.numPages; desde += LOTE) {
+    if (pdfDoc !== doc) return;
     const lote: number[] = [];
-    for (let i = desde; i < desde + LOTE && i <= state.totalPages; i++) {
+    for (let i = desde; i < desde + LOTE && i <= doc.numPages; i++) {
       if (!pageMeta.has(i)) lote.push(i); // ya pintada: su placeholder tiene el tamaño real
     }
     // Una página a la vez: en paralelo, sus peticiones Range ocupan las
@@ -431,8 +480,10 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
 async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCanvas?: () => void) {
   if (pageCache.has(pageNum)) return;
 
-  const doc = pdfDoc!;
-  const page = await doc.getPage(pageNum);
+  const doc = pdfDoc;
+  if (!doc) return;
+  const page = await doc.getPage(pageNum).catch(() => null);
+  if (!page) return;
   // El observer y renderVisiblePlaceholders pueden pedir la misma página a la vez.
   if (pdfDoc !== doc || pageCache.has(pageNum)) return;
   if (!pageMeta.has(pageNum)) {
@@ -527,8 +578,10 @@ async function cleanupPage(pageNum: number, placeholder: HTMLElement) {
   try { cached.renderTask?.cancel(); } catch {}
   cached.highlighter?.disable();
 
-  const page = await pdfDoc!.getPage(pageNum);
-  await page.cleanup();
+  const doc = pdfDoc;
+  try { (await doc?.getPage(pageNum))?.cleanup(); } catch {}
+  // Mientras tanto pudo cambiar el documento o volver a pintarse la página.
+  if (pdfDoc !== doc || pageCache.get(pageNum) !== cached) return;
 
   cached.canvas.width = 0;
   cached.canvas.height = 0;

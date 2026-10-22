@@ -92,18 +92,20 @@ El build copia primero los assets necesarios de `pdfjs-dist` hacia `public/pdfjs
 | `file` | URL absoluta del documento a visualizar | `?file=https://cdnscout.org/biblioteca/doc.pdf` |
 | `page` | Página en la que abre el documento (opcional) | `&page=12` |
 
-Si `file` está ausente el visor redirige a la landing. Si no pasa la validación de seguridad, muestra una pantalla de error.
+Si `file` está ausente el visor redirige a la landing, salvo que esté embebido en un iframe: entonces queda en espera (ver Citas desde Zulú). Si no pasa la validación de seguridad, muestra una pantalla de error.
 
 ## Citas desde Zulú
 
 Zulú embebe el visor en un iframe y le pasa los fragmentos que citó con `postMessage`:
 
 1. En cuanto abre el documento, antes de pintar páginas, el visor envía `{ tipo: 'visor:listo' }` a la ventana padre.
-2. La página padre responde con `{ tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }`.
+2. La página padre responde con `{ tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina?, file? }`.
 3. El visor subraya cada fragmento en su página y salta a `pagina`, o a la primera página citada. Un mensaje nuevo reemplaza las citas anteriores.
-4. Si se pulsa `Escape` dentro del visor (fuera de un campo de texto), el visor envía `{ tipo: 'visor:escape' }` a la ventana padre, que puede cerrar el panel. Las teclas dentro de un iframe no llegan a la página que lo embebe.
+4. Si `file` es otro documento, el visor descarta el actual (páginas, búsqueda, índice y zoom) y abre ese en `pagina` sin recargar el iframe. Si llegan varios seguidos, gana el último. `file` pasa por la misma validación que `?file=`; si no la pasa, el mensaje se ignora. Con el mismo documento solo cambian las citas y la página.
+5. En espera: embebido sin `?file=`, el visor arranca vacío, compila el worker de PDF.js y envía `visor:listo` una sola vez. Zulú mantiene ese iframe montado y abre cada cita con `file`. Al abrir un documento por mensaje no se repite `visor:listo`.
+6. Si se pulsa `Escape` dentro del visor (fuera de un campo de texto), el visor envía `{ tipo: 'visor:escape' }` a la ventana padre, que puede cerrar el panel. Las teclas dentro de un iframe no llegan a la página que lo embebe.
 
-Solo se aceptan mensajes de `https://*.scout.org.co` y de `http://localhost`. El fragmento viene de una transcripción de la página, así que no se busca la frase exacta (`src/citas.ts`): se ubica el tramo donde se concentran los trigramas de palabras del fragmento. Si la página no tiene capa de texto o la transcripción es muy distinta, el visor solo abre la página.
+Solo se aceptan mensajes de la ventana padre con origen `https://*.scout.org.co` o `http://localhost`. El fragmento viene de una transcripción de la página, así que no se busca la frase exacta (`src/citas.ts`): se ubica el tramo donde se concentran los trigramas de palabras del fragmento. Si la página no tiene capa de texto o la transcripción es muy distinta, el visor solo abre la página.
 
 ## Seguridad
 
