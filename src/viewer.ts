@@ -253,7 +253,7 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
 /**
  * Mientras el iframe estuvo oculto se ignoraron los avisos del observer, que no
  * vuelve a avisar por las páginas que siguen fuera: al mostrarse, libera las
- * pintadas que quedaron lejos (mismo margen que el observer).
+ * pintadas que quedaron a más de dos alturas de la vista.
  */
 function liberarLejanas() {
   const margen = window.innerHeight * 2;
