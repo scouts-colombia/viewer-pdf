@@ -218,6 +218,8 @@ const state: ViewerState = {
 
 const pageMeta = new Map<number, PageMeta>();
 const pageCache = new Map<number, PageCache>();
+// El iframe está oculto: el observer da sus páginas por fuera de la vista.
+let oculto = false;
 // Fragmentos citados por Zulú, por número de página.
 const citasPorPagina = new Map<number, string[]>();
 // Página pedida antes de que existan los placeholders (?page= o una cita): el
@@ -246,6 +248,21 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
   window.addEventListener('resize', () => {
     if (state.fitMode === 'none' && state.totalPages > 0) requestRerender();
   }, { passive: true });
+}
+
+/**
+ * Mientras el iframe estuvo oculto se ignoraron los avisos del observer, que no
+ * vuelve a avisar por las páginas que siguen fuera: al mostrarse, libera las
+ * pintadas que quedaron lejos (mismo margen que el observer).
+ */
+function liberarLejanas() {
+  const margen = window.innerHeight * 2;
+  for (const pageNum of [...pageCache.keys()]) {
+    const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
+    if (!placeholder) continue;
+    const { top, bottom } = placeholder.getBoundingClientRect();
+    if (bottom < -margen || top > window.innerHeight + margen) void cleanupPage(pageNum, placeholder);
+  }
 }
 
 /**
@@ -496,6 +513,17 @@ function sinMoverVista(cambiar: () => void) {
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
   for (const entry of entries) {
+    // Oculto (Zulú cierra el panel con display:none), toda página mide 0 y
+    // parece fuera de la vista: se conservan las pintadas para reabrir.
+    const { width, height } = entry.boundingClientRect;
+    if (width === 0 && height === 0) {
+      oculto = true;
+      continue;
+    }
+    if (oculto) {
+      oculto = false;
+      liberarLejanas();
+    }
     const pageNum = Number((entry.target as HTMLElement).dataset.page);
     if (entry.isIntersecting) {
       renderPage(pageNum, entry.target as HTMLElement);
