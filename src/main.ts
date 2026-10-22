@@ -107,7 +107,7 @@ if (window.parent !== window) {
 // { tipo: 'zulu:citas', citas: [{ pagina, texto }], pagina? }. Subraya cada
 // fragmento en su página y salta a `pagina`, o a la primera página citada.
 function recibirCitas(e: MessageEvent) {
-  if (!ORIGEN_CITAS.test(e.origin) || e.data?.tipo !== 'zulu:citas') return;
+  if (e.source !== window.parent || !ORIGEN_CITAS.test(e.origin) || e.data?.tipo !== 'zulu:citas') return;
   const citas = (Array.isArray(e.data.citas) ? e.data.citas : [])
     .slice(0, MAX_CITAS)
     .flatMap((c: { pagina?: unknown; texto?: unknown }) => {

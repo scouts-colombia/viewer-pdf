@@ -326,15 +326,35 @@ async function buildPlaceholders() {
     onStateChange({ ...state });
   }
 
-  // Si esa página falla, el resto del documento se sigue mostrando.
-  await renderPage(inicial, objetivo).catch(err => console.error('[viewer]', err));
-  if (pdfDoc !== doc) return;
+  // Las demás páginas se pintan en cuanto está el canvas de la inicial, o antes
+  // si el usuario o una cita mueven la vista lejos del salto: si no, la página a
+  // la que llegan queda en blanco mientras la inicial termina su capa de texto.
+  const scrollRoot = document.scrollingElement ?? document.documentElement;
+  const ySalto = scrollRoot.scrollTop;
+  const escucha = new AbortController();
+  let activas = false;
+  const activarVecinas = () => {
+    escucha.abort();
+    if (activas || pdfDoc !== doc) return;
+    activas = true;
+    for (const p of placeholders) observer.observe(p);
+    // Fallback: IntersectionObserver may not fire in hidden/headless contexts.
+    renderVisiblePlaceholders();
+  };
+  const alMover = () => {
+    if (Math.abs(scrollRoot.scrollTop - ySalto) > window.innerHeight / 2) activarVecinas();
+  };
+  window.addEventListener('scroll', alMover, { passive: true, signal: escucha.signal });
+  containerEl.addEventListener('scroll', alMover, { passive: true, signal: escucha.signal });
 
-  // Con la página inicial pintada, las vecinas.
-  for (const p of placeholders) observer.observe(p);
-  // Fallback: IntersectionObserver may not fire in hidden/headless contexts.
-  renderVisiblePlaceholders();
-  void medirPaginas(doc);
+  // Si esa página falla, el resto del documento se sigue mostrando.
+  await renderPage(inicial, objetivo, activarVecinas).catch(err => console.error('[viewer]', err));
+  if (pdfDoc !== doc) return;
+  activarVecinas();
+
+  medirPaginas(doc).catch(err => {
+    if (pdfDoc === doc) console.error('[viewer]', err);
+  });
 }
 
 /**
@@ -406,7 +426,8 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
   }
 }
 
-async function renderPage(pageNum: number, placeholder: HTMLElement) {
+/** `alPintarCanvas` corre cuando el canvas ya está en la página, antes de la capa de texto. */
+async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCanvas?: () => void) {
   if (pageCache.has(pageNum)) return;
 
   const doc = pdfDoc!;
@@ -477,6 +498,7 @@ async function renderPage(pageNum: number, placeholder: HTMLElement) {
   placeholder.style.setProperty('--total-scale-factor', String(scale));
   // La capa de citas va entre el canvas y el textLayer para no tapar la selección.
   placeholder.append(canvas, capaCitas, textLayerDiv);
+  alPintarCanvas?.();
 
   const textContent = await page.getTextContent();
   if (!isCurrentRender()) return;
