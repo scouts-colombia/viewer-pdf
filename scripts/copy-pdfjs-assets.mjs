@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,13 +11,8 @@ const dest = resolve(assets, version);
 
 if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
 
-// Las rutas sin versión conservan los archivos 5.7.284 ya versionados en Git:
-// un visor abierto antes del despliegue todavía puede pedirlos.
-for (const entry of readdirSync(assets)) {
-  if (/^\d+\.\d+\.\d+/.test(entry) && entry !== version) {
-    rmSync(resolve(assets, entry), { recursive: true, force: true });
-  }
-}
+// Las carpetas de versiones anteriores y las rutas sin versión (5.7.284) no se
+// borran: una pestaña abierta con el JS anterior todavía puede pedirlas.
 
 const copy = (src, dst) => {
   if (!existsSync(src)) {

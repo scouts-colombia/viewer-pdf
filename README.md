@@ -159,11 +159,10 @@ no actualiza una pestaña ya abierta; no hay un número de despliegues que asegu
 que todas se hayan cerrado. Retirar estas rutas exige aceptar que esos clientes
 tendrán que recargar.
 
-El script elimina carpetas de otras versiones para no acumularlas. En futuras
-actualizaciones de PDF.js, las pestañas que todavía ejecuten el JS anterior
-necesitarán recargar si piden un recurso de la versión retirada que no tienen
-en caché. Para soportarlas sin recarga habría que conservar esos recursos fuera
-de esta limpieza.
+El script no borra las carpetas de versiones anteriores: una pestaña que todavía
+ejecute el JS anterior puede pedir un recurso que no tiene en caché. Solo la
+versión vigente lleva la regla inmutable; las anteriores quedan con la caché
+corta por defecto.
 
 ## Tecnologías
 

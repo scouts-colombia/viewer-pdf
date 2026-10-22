@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('copia la versión instalada, retira otras y conserva las rutas antiguas', () => {
+test('copia la versión instalada y conserva las versiones y rutas anteriores', () => {
   const base = resolve(process.env.TEMP ?? process.env.TMP ?? '/tmp');
   // En Windows los temporales del proyecto viven en D:\\tmp.
   const parent = process.platform === 'win32' ? 'D:/tmp' : base;
@@ -22,7 +22,7 @@ test('copia la versión instalada, retira otras y conserva las rutas antiguas', 
     writeFileSync(resolve(root, 'public/pdfjs/pdf.worker.min.mjs'), 'worker anterior');
     writeFileSync(resolve(root, 'public/_headers'), '/pdfjs/5.7.284/*\n  Cache-Control: public, max-age=31536000, immutable\n');
     execFileSync(process.execPath, [resolve(root, 'scripts/copy-pdfjs-assets.mjs')]);
-    assert.equal(existsSync(resolve(root, 'public/pdfjs/5.7.284')), false);
+    assert.equal(existsSync(resolve(root, 'public/pdfjs/5.7.284')), true);
     assert.equal(readFileSync(resolve(root, 'public/pdfjs/pdf.worker.min.mjs'), 'utf8'), 'worker anterior');
     assert.equal(readFileSync(resolve(root, 'public/pdfjs/6.0.123/pdf.worker.min.mjs'), 'utf8'), 'worker nuevo');
     for (const name of ['cmaps', 'wasm', 'standard_fonts']) assert.equal(readFileSync(resolve(root, 'public/pdfjs/6.0.123', name, 'recurso'), 'utf8'), name);
