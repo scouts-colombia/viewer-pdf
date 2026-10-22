@@ -258,7 +258,8 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
 export async function loadDocument(url: URL, pagina: number, alAbrir?: () => void) {
   const id = ++carga;
   descartarDocumento();
-  paginaInicial = pagina > 0 ? pagina : 1;
+  const enPagina = pagina > 0;
+  paginaInicial = enPagina ? pagina : 1;
   setState({ totalPages: 0, currentPage: 1, scale: 1, fitMode: 'width', spreadMode: false, loading: true });
 
   const task = pdfjsLib.getDocument({
@@ -271,8 +272,13 @@ export async function loadDocument(url: URL, pagina: number, alAbrir?: () => voi
     useSystemFonts: true,
     useWorkerFetch: true,
     wasmUrl: '/pdfjs/wasm/',
-    disableStream: false,
-    disableAutoFetch: false,
+    // Abrir en una página (una cita, ?page=) pide solo los rangos que esa página
+    // necesita: el stream completo toma el candado de la caché HTTP de Chrome y
+    // los rangos esperan a que baje el archivo entero. Leer desde el principio
+    // (biblioteca) conserva el stream y la descarga de fondo para el scroll.
+    disableStream: enPagina,
+    disableAutoFetch: enPagina,
+    rangeChunkSize: enPagina ? 262144 : undefined,
     worker: worker ?? undefined,
   });
   tarea = task;
