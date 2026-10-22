@@ -512,11 +512,17 @@ function sinMoverVista(cambiar: () => void) {
 }
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
-  for (const entry of entries) {
-    // Oculto (Zulú cierra el panel con display:none), toda página mide 0 y
-    // parece fuera de la vista: se conservan las pintadas para reabrir.
-    const { width, height } = entry.boundingClientRect;
-    if (width === 0 && height === 0) {
+  // Un aviso puede traer varias entradas de la misma página, la más reciente al
+  // final (Firefox, al mostrarse el iframe): solo vale esa.
+  const ultimas = new Map<Element, IntersectionObserverEntry>();
+  for (const entry of entries) ultimas.set(entry.target, entry);
+  for (const entry of ultimas.values()) {
+    // Oculto (Zulú cierra el panel), las páginas parecen fuera de la vista: se
+    // conservan las pintadas para reabrir. Chrome y Firefox las miden 0 × 0;
+    // WebKit les deja su tamaño y las da fuera aunque estén en la ventana.
+    const { width, height, top, bottom } = entry.boundingClientRect;
+    const enVentana = bottom > 0 && top < window.innerHeight;
+    if ((width === 0 && height === 0) || (!entry.isIntersecting && enVentana)) {
       oculto = true;
       continue;
     }
@@ -644,22 +650,26 @@ async function cleanupPage(pageNum: number, placeholder: HTMLElement) {
   try { cached.renderTask?.cancel(); } catch {}
   cached.highlighter?.disable();
 
-  const doc = pdfDoc;
-  try { (await doc?.getPage(pageNum))?.cleanup(); } catch {}
-  // Mientras tanto pudo cambiar el documento o volver a pintarse la página.
-  if (pdfDoc !== doc || pageCache.get(pageNum) !== cached) return;
-
+  // Sale de la caché antes del await: si el mismo aviso del observer la vuelve
+  // a pedir, renderPage la pinta de nuevo en vez de darla por pintada.
+  pageCache.delete(pageNum);
   cached.canvas.width = 0;
   cached.canvas.height = 0;
   cached.canvas.remove();
   cached.capaCitas.remove();
   cached.textLayer.remove();
-  pageCache.delete(pageNum);
 
   const { width, height } = effectiveSize(pageNum);
   placeholder.style.width = width + 'px';
   placeholder.style.height = height + 'px';
   placeholder.innerHTML = '';
+
+  const doc = pdfDoc;
+  try {
+    const page = await doc?.getPage(pageNum);
+    // Mientras tanto pudo cambiar el documento o volver a pintarse la página.
+    if (pdfDoc === doc && !pageCache.has(pageNum)) page?.cleanup();
+  } catch {}
 }
 
 function effectiveScale(page: PDFPageProxy): number {
