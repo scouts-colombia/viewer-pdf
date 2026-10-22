@@ -195,9 +195,17 @@ let containerEl: HTMLElement;
 let observer: IntersectionObserver;
 let onStateChange: (s: ViewerState) => void;
 
+// Bus de la barra de búsqueda (search.ts). Cada documento tiene su propio bus
+// y su PDFFindController; pdf.js no permite destruir un find controller, así
+// que al descartar el documento se corta el reenvío entre los dos buses y una
+// búsqueda vieja a medias no puede tocar los resultados del nuevo.
 export let eventBus: EventBus;
-export let linkService: PDFLinkService;
-export let findController: PDFFindController;
+interface Busqueda {
+  bus: EventBus;
+  fc: PDFFindController;
+  corte: AbortController;
+}
+let busqueda: Busqueda | null = null;
 
 const state: ViewerState = {
   totalPages: 0,
@@ -225,28 +233,6 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
   onStateChange = onChange;
 
   eventBus = new EventBus();
-  linkService = new PDFLinkService({ eventBus });
-
-  // PDFLinkService.pagesCount uses pdfDocument.pagesMapper (internal viewer API,
-  // not on PDFDocumentProxy). PDFLinkService.page needs pdfViewer.currentPageNumber.
-  // Neither is set up in our custom viewer — override both on the instance so
-  // PDFFindController can iterate pages and navigate to matches.
-  Object.defineProperty(linkService, 'pagesCount', {
-    get: () => state.totalPages,
-    configurable: true,
-  });
-  Object.defineProperty(linkService, 'page', {
-    get: () => state.currentPage,
-    set: (n: number) => {
-      const clamped = Math.max(1, Math.min(state.totalPages, n));
-      state.currentPage = clamped;
-      scrollPageIntoViewIfNeeded(clamped);
-      onStateChange({ ...state });
-    },
-    configurable: true,
-  });
-
-  findController = new PDFFindController({ eventBus, linkService });
 
   observer = new IntersectionObserver(handleIntersection, {
     root: null,
@@ -295,8 +281,7 @@ export async function loadDocument(url: URL, pagina: number, alAbrir?: () => voi
     const doc = await task.promise;
     if (id !== carga) return;
     pdfDoc = doc;
-    linkService.setDocument(doc);
-    findController.setDocument(doc);
+    busqueda = crearBusqueda(doc);
     alAbrir?.();
 
     setState({ totalPages: doc.numPages, currentPage: 1, loading: false });
@@ -307,13 +292,51 @@ export async function loadDocument(url: URL, pagina: number, alAbrir?: () => voi
   }
 }
 
+function crearBusqueda(doc: PDFDocumentProxy): Busqueda {
+  const bus = new EventBus();
+  const linkService = new PDFLinkService({ eventBus: bus });
+  // PDFLinkService.pagesCount uses pdfDocument.pagesMapper (internal viewer API,
+  // not on PDFDocumentProxy). PDFLinkService.page needs pdfViewer.currentPageNumber.
+  // Neither is set up in our custom viewer — override both on the instance so
+  // PDFFindController can iterate pages and navigate to matches.
+  Object.defineProperty(linkService, 'pagesCount', {
+    get: () => doc.numPages,
+    configurable: true,
+  });
+  Object.defineProperty(linkService, 'page', {
+    get: () => (pdfDoc === doc ? state.currentPage : 1),
+    set: (n: number) => {
+      if (pdfDoc !== doc) return;
+      const clamped = Math.max(1, Math.min(state.totalPages, n));
+      state.currentPage = clamped;
+      scrollPageIntoViewIfNeeded(clamped);
+      onStateChange({ ...state });
+    },
+    configurable: true,
+  });
+  linkService.setDocument(doc);
+  const fc = new PDFFindController({ eventBus: bus, linkService });
+  fc.setDocument(doc);
+
+  const corte = new AbortController();
+  const { signal } = corte;
+  eventBus.on('find', (evt: object) => bus.dispatch('find', evt), { signal });
+  for (const nombre of ['updatefindmatchescount', 'updatefindcontrolstate']) {
+    bus.on(nombre, (evt: object) => eventBus.dispatch(nombre, evt), { signal });
+  }
+  return { bus, fc, corte };
+}
+
 /** Cancela el documento actual y deja el visor vacío, en el ajuste por defecto. */
 function descartarDocumento() {
   void tarea?.destroy();
   tarea = null;
   pdfDoc = null;
-  linkService.setDocument(null);
-  findController.setDocument(null as unknown as PDFDocumentProxy);
+  busqueda?.corte.abort();
+  // Sin documento, la extracción de texto que el find controller tenga a medias
+  // se detiene en la página siguiente en vez de pedirla al documento destruido.
+  busqueda?.fc.setDocument(null as unknown as PDFDocumentProxy);
+  busqueda = null;
   placeholdersListos = false;
   rerenderVersion++;
   observer.disconnect();
@@ -481,7 +504,8 @@ async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCan
   if (pageCache.has(pageNum)) return;
 
   const doc = pdfDoc;
-  if (!doc) return;
+  const { fc, bus } = busqueda ?? {};
+  if (!doc || !fc || !bus) return;
   const page = await doc.getPage(pageNum).catch(() => null);
   if (!page) return;
   // El observer y renderVisiblePlaceholders pueden pedir la misma página a la vez.
@@ -552,10 +576,18 @@ async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCan
   placeholder.append(canvas, capaCitas, textLayerDiv);
   alPintarCanvas?.();
 
-  const textContent = await page.getTextContent();
-  if (!isCurrentRender()) return;
-  const tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
-  await tl.render();
+  let textContent: Awaited<ReturnType<PDFPageProxy['getTextContent']>>;
+  let tl: TextLayer;
+  try {
+    textContent = await page.getTextContent();
+    if (!isCurrentRender()) return;
+    tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
+    await tl.render();
+  } catch (err) {
+    // Un documento descartado a mitad de la capa de texto rechaza: no es error.
+    if (pdfDoc === doc) console.error('[viewer]', err);
+    return;
+  }
 
   if (!isCurrentRender()) return;
   pageCache.get(pageNum)!.textoPagina = {
@@ -564,7 +596,7 @@ async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCan
     divs: tl.textDivs,
   };
   pintarCitas(pageNum);
-  const hl = new TextHighlighter(findController, eventBus, pageNum - 1);
+  const hl = new TextHighlighter(fc, bus, pageNum - 1);
   hl.setTextMapping(tl.textDivs, tl.textContentItemsStr);
   hl.enable();
   const cache = pageCache.get(pageNum);
