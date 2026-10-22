@@ -349,8 +349,9 @@ async function buildPlaceholders() {
 
   // Si esa página falla, el resto del documento se sigue mostrando.
   await renderPage(inicial, objetivo, activarVecinas).catch(err => console.error('[viewer]', err));
-  if (pdfDoc !== doc) return;
+  // Antes del chequeo: también corta la escucha del scroll si el documento cambió.
   activarVecinas();
+  if (pdfDoc !== doc) return;
 
   medirPaginas(doc).catch(err => {
     if (pdfDoc === doc) console.error('[viewer]', err);
