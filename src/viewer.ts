@@ -7,6 +7,14 @@ import { ubicarFragmento, type ItemTexto } from './citas.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
 
+// Un solo worker para todos los documentos: se crea al arrancar, así compila
+// mientras el visor espera, y destruir un documento no lo cierra (pdf.js solo
+// destruye el worker que creó él mismo).
+let worker: pdfjsLib.PDFWorker | null = null;
+export function iniciarWorker() {
+  worker ??= new pdfjsLib.PDFWorker();
+}
+
 export interface ViewerState {
   totalPages: number;
   currentPage: number;
@@ -180,13 +188,24 @@ class TextHighlighter {
 }
 
 let pdfDoc: PDFDocumentProxy | null = null;
+// Carga en curso o documento abierto; se destruye al abrir otro.
+let tarea: pdfjsLib.PDFDocumentLoadingTask | null = null;
+let carga = 0;
 let containerEl: HTMLElement;
 let observer: IntersectionObserver;
 let onStateChange: (s: ViewerState) => void;
 
+// Bus de la barra de búsqueda (search.ts). Cada documento tiene su propio bus
+// y su PDFFindController; pdf.js no permite destruir un find controller, así
+// que al descartar el documento se corta el reenvío entre los dos buses y una
+// búsqueda vieja a medias no puede tocar los resultados del nuevo.
 export let eventBus: EventBus;
-export let linkService: PDFLinkService;
-export let findController: PDFFindController;
+interface Busqueda {
+  bus: EventBus;
+  fc: PDFFindController;
+  corte: AbortController;
+}
+let busqueda: Busqueda | null = null;
 
 const state: ViewerState = {
   totalPages: 0,
@@ -199,6 +218,8 @@ const state: ViewerState = {
 
 const pageMeta = new Map<number, PageMeta>();
 const pageCache = new Map<number, PageCache>();
+// El iframe está oculto: el observer da sus páginas por fuera de la vista.
+let oculto = false;
 // Fragmentos citados por Zulú, por número de página.
 const citasPorPagina = new Map<number, string[]>();
 // Página pedida antes de que existan los placeholders (?page= o una cita): el
@@ -214,28 +235,6 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
   onStateChange = onChange;
 
   eventBus = new EventBus();
-  linkService = new PDFLinkService({ eventBus });
-
-  // PDFLinkService.pagesCount uses pdfDocument.pagesMapper (internal viewer API,
-  // not on PDFDocumentProxy). PDFLinkService.page needs pdfViewer.currentPageNumber.
-  // Neither is set up in our custom viewer — override both on the instance so
-  // PDFFindController can iterate pages and navigate to matches.
-  Object.defineProperty(linkService, 'pagesCount', {
-    get: () => state.totalPages,
-    configurable: true,
-  });
-  Object.defineProperty(linkService, 'page', {
-    get: () => state.currentPage,
-    set: (n: number) => {
-      const clamped = Math.max(1, Math.min(state.totalPages, n));
-      state.currentPage = clamped;
-      scrollPageIntoViewIfNeeded(clamped);
-      onStateChange({ ...state });
-    },
-    configurable: true,
-  });
-
-  findController = new PDFFindController({ eventBus, linkService });
 
   observer = new IntersectionObserver(handleIntersection, {
     root: null,
@@ -252,11 +251,33 @@ export function initViewer(container: HTMLElement, onChange: (s: ViewerState) =>
 }
 
 /**
- * Abre el documento. `alAbrir` corre en cuanto pdf.js lo abre, antes de pintar
- * nada, para que la página que embebe el visor mande las citas en paralelo.
+ * Mientras el iframe estuvo oculto se ignoraron los avisos del observer, que no
+ * vuelve a avisar por las páginas que siguen fuera: al mostrarse, libera las
+ * pintadas que quedaron a más de dos alturas de la vista.
  */
-export async function loadDocument(url: URL, alAbrir: () => void) {
-  setState({ loading: true });
+function liberarLejanas() {
+  const margen = window.innerHeight * 2;
+  for (const pageNum of [...pageCache.keys()]) {
+    const placeholder = containerEl.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
+    if (!placeholder) continue;
+    const { top, bottom } = placeholder.getBoundingClientRect();
+    if (bottom < -margen || top > window.innerHeight + margen) void cleanupPage(pageNum, placeholder);
+  }
+}
+
+/**
+ * Abre el documento en `pagina` y descarta el que hubiera, cargado o a medio
+ * cargar. Las citas se borran aquí, de forma síncrona: las que se guarden
+ * después de llamar se subrayan al pintar. `alAbrir` corre en cuanto pdf.js lo
+ * abre, antes de pintar nada, para que la página que embebe el visor mande las
+ * citas en paralelo. Si otra llamada la reemplaza, termina sin error.
+ */
+export async function loadDocument(url: URL, pagina: number, alAbrir?: () => void) {
+  const id = ++carga;
+  descartarDocumento();
+  const enPagina = pagina > 0;
+  paginaInicial = enPagina ? pagina : 1;
+  setState({ totalPages: 0, currentPage: 1, scale: 1, fitMode: 'width', spreadMode: false, loading: true });
 
   const task = pdfjsLib.getDocument({
     url: url.toString(),
@@ -268,17 +289,90 @@ export async function loadDocument(url: URL, alAbrir: () => void) {
     useSystemFonts: true,
     useWorkerFetch: true,
     wasmUrl: '/pdfjs/wasm/',
-    disableStream: false,
-    disableAutoFetch: false,
+    // Abrir en una página (una cita, ?page=) pide solo los rangos que esa página
+    // necesita: el stream completo toma el candado de la caché HTTP de Chrome y
+    // los rangos esperan a que baje el archivo entero. Leer desde el principio
+    // (biblioteca) conserva el stream y la descarga de fondo para el scroll.
+    disableStream: enPagina,
+    disableAutoFetch: enPagina,
+    rangeChunkSize: enPagina ? 262144 : undefined,
+    worker: worker ?? undefined,
   });
+  tarea = task;
 
-  pdfDoc = await task.promise;
-  linkService.setDocument(pdfDoc);
-  findController.setDocument(pdfDoc);
-  alAbrir();
+  try {
+    const doc = await task.promise;
+    if (id !== carga) return;
+    pdfDoc = doc;
+    busqueda = crearBusqueda(doc);
+    alAbrir?.();
 
-  setState({ totalPages: pdfDoc.numPages, currentPage: 1, loading: false });
-  await buildPlaceholders();
+    setState({ totalPages: doc.numPages, currentPage: 1, loading: false });
+    await buildPlaceholders();
+  } catch (err) {
+    // Un documento descartado a medio cargar rechaza sus promesas: no es error.
+    if (id === carga) throw err;
+  }
+}
+
+function crearBusqueda(doc: PDFDocumentProxy): Busqueda {
+  const bus = new EventBus();
+  const linkService = new PDFLinkService({ eventBus: bus });
+  // PDFLinkService.pagesCount uses pdfDocument.pagesMapper (internal viewer API,
+  // not on PDFDocumentProxy). PDFLinkService.page needs pdfViewer.currentPageNumber.
+  // Neither is set up in our custom viewer — override both on the instance so
+  // PDFFindController can iterate pages and navigate to matches.
+  Object.defineProperty(linkService, 'pagesCount', {
+    get: () => doc.numPages,
+    configurable: true,
+  });
+  Object.defineProperty(linkService, 'page', {
+    get: () => (pdfDoc === doc ? state.currentPage : 1),
+    set: (n: number) => {
+      if (pdfDoc !== doc) return;
+      const clamped = Math.max(1, Math.min(state.totalPages, n));
+      state.currentPage = clamped;
+      scrollPageIntoViewIfNeeded(clamped);
+      onStateChange({ ...state });
+    },
+    configurable: true,
+  });
+  linkService.setDocument(doc);
+  const fc = new PDFFindController({ eventBus: bus, linkService });
+  fc.setDocument(doc);
+
+  const corte = new AbortController();
+  const { signal } = corte;
+  eventBus.on('find', (evt: object) => bus.dispatch('find', evt), { signal });
+  for (const nombre of ['updatefindmatchescount', 'updatefindcontrolstate']) {
+    bus.on(nombre, (evt: object) => eventBus.dispatch(nombre, evt), { signal });
+  }
+  return { bus, fc, corte };
+}
+
+/** Cancela el documento actual y deja el visor vacío, en el ajuste por defecto. */
+function descartarDocumento() {
+  void tarea?.destroy();
+  tarea = null;
+  pdfDoc = null;
+  busqueda?.corte.abort();
+  // Sin documento, la extracción de texto que el find controller tenga a medias
+  // se detiene en la página siguiente en vez de pedirla al documento destruido.
+  busqueda?.fc.setDocument(null as unknown as PDFDocumentProxy);
+  busqueda = null;
+  placeholdersListos = false;
+  rerenderVersion++;
+  observer.disconnect();
+  for (const cached of pageCache.values()) {
+    try { cached.renderTask?.cancel(); } catch {}
+    cached.highlighter?.disable();
+  }
+  pageCache.clear();
+  pageMeta.clear();
+  citasPorPagina.clear();
+  containerEl.replaceChildren();
+  containerEl.classList.remove('spread-mode', 'is-zooming');
+  (document.scrollingElement ?? document.documentElement).scrollTo({ top: 0, behavior: 'auto' });
 }
 
 /**
@@ -295,13 +389,13 @@ async function buildPlaceholders() {
 
   const medir = async (n: number) => {
     const viewport1 = (await doc.getPage(n)).getViewport({ scale: 1 });
-    if (!pageMeta.has(n)) pageMeta.set(n, { viewport1 });
+    if (pdfDoc === doc && !pageMeta.has(n)) pageMeta.set(n, { viewport1 });
   };
   const destino = () => Math.max(1, Math.min(state.totalPages, paginaInicial));
   // La página 1 da el tamaño estimado del resto. Si llega una cita mientras se
   // mide, el destino cambia y se mide también.
   await Promise.all([medir(1), medir(destino())]);
-  while (!pageMeta.has(destino())) await medir(destino());
+  while (pdfDoc === doc && !pageMeta.has(destino())) await medir(destino());
   if (pdfDoc !== doc) return;
 
   const placeholders: HTMLElement[] = [];
@@ -367,9 +461,10 @@ async function buildPlaceholders() {
 async function medirPaginas(doc: PDFDocumentProxy) {
   const base = pageMeta.get(1)!.viewport1;
   const LOTE = 8;
-  for (let desde = 2; desde <= state.totalPages; desde += LOTE) {
+  for (let desde = 2; desde <= doc.numPages; desde += LOTE) {
+    if (pdfDoc !== doc) return;
     const lote: number[] = [];
-    for (let i = desde; i < desde + LOTE && i <= state.totalPages; i++) {
+    for (let i = desde; i < desde + LOTE && i <= doc.numPages; i++) {
       if (!pageMeta.has(i)) lote.push(i); // ya pintada: su placeholder tiene el tamaño real
     }
     // Una página a la vez: en paralelo, sus peticiones Range ocupan las
@@ -417,7 +512,24 @@ function sinMoverVista(cambiar: () => void) {
 }
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
-  for (const entry of entries) {
+  // Un aviso puede traer varias entradas de la misma página, la más reciente al
+  // final (Firefox, al mostrarse el iframe): solo vale esa.
+  const ultimas = new Map<Element, IntersectionObserverEntry>();
+  for (const entry of entries) ultimas.set(entry.target, entry);
+  for (const entry of ultimas.values()) {
+    // Oculto (Zulú cierra el panel), las páginas parecen fuera de la vista: se
+    // conservan las pintadas para reabrir. Chrome y Firefox las miden 0 × 0;
+    // WebKit les deja su tamaño y las da fuera aunque estén en la ventana.
+    const { width, height, top, bottom } = entry.boundingClientRect;
+    const enVentana = bottom > 0 && top < window.innerHeight;
+    if ((width === 0 && height === 0) || (!entry.isIntersecting && enVentana)) {
+      oculto = true;
+      continue;
+    }
+    if (oculto) {
+      oculto = false;
+      liberarLejanas();
+    }
     const pageNum = Number((entry.target as HTMLElement).dataset.page);
     if (entry.isIntersecting) {
       renderPage(pageNum, entry.target as HTMLElement);
@@ -431,8 +543,11 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
 async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCanvas?: () => void) {
   if (pageCache.has(pageNum)) return;
 
-  const doc = pdfDoc!;
-  const page = await doc.getPage(pageNum);
+  const doc = pdfDoc;
+  const { fc, bus } = busqueda ?? {};
+  if (!doc || !fc || !bus) return;
+  const page = await doc.getPage(pageNum).catch(() => null);
+  if (!page) return;
   // El observer y renderVisiblePlaceholders pueden pedir la misma página a la vez.
   if (pdfDoc !== doc || pageCache.has(pageNum)) return;
   if (!pageMeta.has(pageNum)) {
@@ -501,10 +616,18 @@ async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCan
   placeholder.append(canvas, capaCitas, textLayerDiv);
   alPintarCanvas?.();
 
-  const textContent = await page.getTextContent();
-  if (!isCurrentRender()) return;
-  const tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
-  await tl.render();
+  let textContent: Awaited<ReturnType<PDFPageProxy['getTextContent']>>;
+  let tl: TextLayer;
+  try {
+    textContent = await page.getTextContent();
+    if (!isCurrentRender()) return;
+    tl = new TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
+    await tl.render();
+  } catch (err) {
+    // Un documento descartado a mitad de la capa de texto rechaza: no es error.
+    if (pdfDoc === doc) console.error('[viewer]', err);
+    return;
+  }
 
   if (!isCurrentRender()) return;
   pageCache.get(pageNum)!.textoPagina = {
@@ -513,7 +636,7 @@ async function renderPage(pageNum: number, placeholder: HTMLElement, alPintarCan
     divs: tl.textDivs,
   };
   pintarCitas(pageNum);
-  const hl = new TextHighlighter(findController, eventBus, pageNum - 1);
+  const hl = new TextHighlighter(fc, bus, pageNum - 1);
   hl.setTextMapping(tl.textDivs, tl.textContentItemsStr);
   hl.enable();
   const cache = pageCache.get(pageNum);
@@ -527,20 +650,26 @@ async function cleanupPage(pageNum: number, placeholder: HTMLElement) {
   try { cached.renderTask?.cancel(); } catch {}
   cached.highlighter?.disable();
 
-  const page = await pdfDoc!.getPage(pageNum);
-  await page.cleanup();
-
+  // Sale de la caché antes del await: si el mismo aviso del observer la vuelve
+  // a pedir, renderPage la pinta de nuevo en vez de darla por pintada.
+  pageCache.delete(pageNum);
   cached.canvas.width = 0;
   cached.canvas.height = 0;
   cached.canvas.remove();
   cached.capaCitas.remove();
   cached.textLayer.remove();
-  pageCache.delete(pageNum);
 
   const { width, height } = effectiveSize(pageNum);
   placeholder.style.width = width + 'px';
   placeholder.style.height = height + 'px';
   placeholder.innerHTML = '';
+
+  const doc = pdfDoc;
+  try {
+    const page = await doc?.getPage(pageNum);
+    // Mientras tanto pudo cambiar el documento o volver a pintarse la página.
+    if (pdfDoc === doc && !pageCache.has(pageNum)) page?.cleanup();
+  } catch {}
 }
 
 function effectiveScale(page: PDFPageProxy): number {
