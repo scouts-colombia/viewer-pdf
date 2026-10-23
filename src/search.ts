@@ -35,13 +35,15 @@ export function initSearch(
     }
   });
 
-  eventBus.on('updatefindmatchescount', ({ matchesCount }: { matchesCount: { current: number; total: number } }) => {
+  const updateCounter = ({ matchesCount }: { matchesCount: { current: number; total: number } }) => {
     const { current, total } = matchesCount;
     counterEl.textContent = total > 0 ? `${current} / ${total}` : '';
     counterEl.style.display = total > 0 ? 'inline' : 'none';
-  });
+  };
+  eventBus.on('updatefindmatchescount', updateCounter);
 
-  eventBus.on('updatefindcontrolstate', ({ state }: { state: number }) => {
+  eventBus.on('updatefindcontrolstate', ({ state, matchesCount }: { state: number; matchesCount: { current: number; total: number } }) => {
+    updateCounter({ matchesCount });
     // 0=found, 1=notfound, 2=wrapped, 3=pending
     if (state === 1) {
       counterEl.textContent = '0 / 0';
